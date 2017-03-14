@@ -87,7 +87,10 @@ class Decoder(object):
                            back_prop=False)
        i, _, _, _, ys_array = final_loop_vars
        sampled_ys = ys_array.gather(tf.range(0, i))
+
        return sampled_ys
+
+
 
     def beam_search(self, beam_size):
 
@@ -216,6 +219,7 @@ class Decoder(object):
         states, attended_states = RecurrentLayer(
                                     initial_state=init_state_att_ctx,
                                     step_fn=step_fn).forward((gates_x, proposal_x))
+        self.states = states # Added for CriticDecoder
         logits = self.predictor.get_logits(y_embs, states, attended_states, multi_step=True)
         return logits
 
@@ -328,42 +332,71 @@ class Encoder(object):
         return concat_states
         
 class StandardModel(object):
-    def __init__(self, config):
+    def __init__(
+            self,
+            config,
+            x=None,
+            x_mask=None,
+            y=None,
+            y_mask=None):
 
         #variable dimensions
         seqLen = None
         batch_size = None
 
-        self.x = tf.placeholder(
-                    dtype=tf.int32,
-                    name='x',
-                    shape=(seqLen, batch_size))
-        self.x_mask = tf.placeholder(
-                        dtype=tf.float32,
-                        name='x_mask',
+        if x is None:
+            x = tf.placeholder(
+                        dtype=tf.int32,
+                        name='x',
                         shape=(seqLen, batch_size))
-        self.y = tf.placeholder(
-                    dtype=tf.int32,
-                    name='y',
-                    shape=(seqLen, batch_size))
-        self.y_mask = tf.placeholder(
-                        dtype=tf.float32,
-                        name='y_mask',
+        if x_mask is None:
+            x_mask = tf.placeholder(
+                            dtype=tf.float32,
+                            name='x_mask',
+                            shape=(seqLen, batch_size))
+        if y is None:
+            y = tf.placeholder(
+                        dtype=tf.int32,
+                        name='y',
                         shape=(seqLen, batch_size))
+        if y_mask is None:
+            y_mask = tf.placeholder(
+                            dtype=tf.float32,
+                            name='y_mask',
+                            shape=(seqLen, batch_size))
+        self.x = x
+        self.x_mask = x_mask
+        self.y = y
+        self.y_mask = y_mask
 
+        self._build_encoder(config)
+        self._build_decoder(config)
+        self._build_loss(config)
+        self._build_optimizer(config)
+
+        #These are built only on request
+        self.sampled_ys = None
+        self.beam_size, self.beam_ys, self.parents, self.cost = None, None, None, None
+
+    def _build_encoder(self, config):
         with tf.name_scope("encoder"):
             self.encoder = Encoder(config)
-            ctx = self.encoder.get_context(self.x, self.x_mask)
         
+    def _build_decoder(self, config):
+        with tf.name_scope("encoder"):
+            self.ctx = self.encoder.get_context(self.x, self.x_mask)
         with tf.name_scope("decoder"):
-            self.decoder = Decoder(config, ctx, self.x_mask)
-            self.logits = self.decoder.score(self.y)
+            self.decoder = Decoder(config, self.ctx, self.x_mask)
 
+    def _build_loss(self, config):
+        with tf.name_scope("decoder"):
+            self.logits = self.decoder.score(self.y)
         with tf.name_scope("loss"):
             self.loss_layer = Masked_cross_entropy_loss(self.y, self.y_mask)
             self.loss_per_sentence = self.loss_layer.forward(self.logits)
             self.mean_loss = tf.reduce_mean(self.loss_per_sentence, keep_dims=False)
 
+    def _build_optimizer(self, config):
         #with tf.name_scope("optimizer"):
         self.optimizer = tf.train.AdamOptimizer(learning_rate=config.learning_rate)
         self.t = tf.Variable(0, name='time', trainable=False, dtype=tf.int32)
@@ -374,8 +407,6 @@ class StandardModel(object):
         grad_vars = zip(clipped_grads, varss)
         self.apply_grads = self.optimizer.apply_gradients(grad_vars, global_step=self.t)
 
-        self.sampled_ys = None
-        self.beam_size, self.beam_ys, self.parents, self.cost = None, None, None, None
 
     def get_score_inputs(self):
         return self.x, self.x_mask, self.y, self.y_mask
@@ -408,8 +439,6 @@ class StandardModel(object):
             sample.append(0)
             samples.append(sample)
         return samples
-
-
 
     def _get_beam_search_outputs(self, beam_size):
         if beam_size != self.beam_size:

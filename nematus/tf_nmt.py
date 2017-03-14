@@ -9,6 +9,7 @@ import os
 from threading import Thread
 from Queue import Queue
 from datetime import datetime
+from tf_critic import *
 
 def create_model(config, sess):
     print >>sys.stderr, 'Building model...',
@@ -24,6 +25,13 @@ def create_model(config, sess):
     print >>sys.stderr, 'Done'
 
     return model, saver 
+
+def load_dictionaries(config):
+    source_to_num = load_dict(config.source_vocab)
+    target_to_num = load_dict(config.target_vocab)
+    num_to_source = reverse_dict(source_to_num)
+    num_to_target = reverse_dict(target_to_num)
+    return source_to_num, target_to_num, num_to_source, num_to_target
 
 def load_data(config):
     print >>sys.stderr, 'Reading data...',
@@ -43,28 +51,21 @@ def load_data(config):
 
     if config.validFreq:
         valid_text_iterator = TextIterator(
-                            source=config.valid_source_dataset,
-                            target=config.valid_target_dataset,
-                            source_dicts=[config.source_vocab],
-                            target_dict=config.target_vocab,
-                            batch_size=config.valid_batch_size,
-                            maxlen=config.validation_maxlen,
-                            n_words_source=config.source_vocab_size,
-                            n_words_target=config.target_vocab_size,
-                            shuffle_each_epoch=False,
-                            sort_by_length=True,
-                            maxibatch_size=config.maxibatch_size)
+                                source=config.valid_source_dataset,
+                                target=config.valid_target_dataset,
+                                source_dicts=[config.source_vocab],
+                                target_dict=config.target_vocab,
+                                batch_size=config.valid_batch_size,
+                                maxlen=config.validation_maxlen,
+                                n_words_source=config.source_vocab_size,
+                                n_words_target=config.target_vocab_size,
+                                shuffle_each_epoch=False,
+                                sort_by_length=True,
+                                maxibatch_size=config.maxibatch_size)
     else:
         valid_text_iterator = None
     print >>sys.stderr, 'Done'
     return text_iterator, valid_text_iterator
-
-def load_dictionaries(config):
-    source_to_num = load_dict(config.source_vocab)
-    target_to_num = load_dict(config.target_vocab)
-    num_to_source = reverse_dict(source_to_num)
-    num_to_target = reverse_dict(target_to_num)
-    return source_to_num, target_to_num, num_to_source, num_to_target
 
 def read_all_lines(config, path):
     source_to_num, _, _, _ = load_dictionaries(config)
@@ -177,6 +178,98 @@ def train(config, sess):
                 break
         if STOP:
             break
+
+def reload_generator(sess, config):
+    generator_vars = tf.get_collection(
+                        key=tf.GraphKeys.TRAINABLE_VARIABLES,
+                        scope="Generator")
+    name_mapping = {}
+    for v in generator_vars:
+        if v.name.startswith('Generator/'):
+            old_name = v.name[len('Generator/'):].rsplit(':', 1)[0]
+            name_mapping[old_name] = v
+            print '{} -> {}'.format(v.name, old_name)
+        else:
+            assert False, v.name
+    gen_saver = tf.train.Saver(var_list=name_mapping)
+    gen_saver.restore(sess, os.path.abspath(config.reload))
+
+def train_wgan(config, sess):
+    print "Train WGAN"
+    x = tf.placeholder(tf.int32, shape=(None,None))
+    x_mask = tf.placeholder(tf.float32, shape=(None,None))
+    y = tf.placeholder(tf.int32, shape=(None,None))
+    y_mask = tf.placeholder(tf.float32, shape=(None,None))
+    print 'Critic...',
+    critic = Critic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask)
+    print 'Done'
+    print 'Generator...',
+    generator = Generator(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask, critic=critic)
+
+
+    print 'Done'
+    saver = tf.train.Saver(max_to_keep=None)
+    text_iterator, _ = load_data(config)
+    gen_text_iterator, _ = load_data(config)
+    source_to_num, target_to_num, num_to_source, num_to_target = load_dictionaries(config)
+
+    init_op = tf.global_variables_initializer()
+    sess.run(init_op)
+    reload_generator(sess, config)
+    last_time = time.time()
+    total_loss = 0.
+    n_words = 0
+    n_sents = 0
+    eidx = 0
+    uidx = 0
+    print 'Epoch', eidx
+    while eidx < config.max_epochs:
+        for d_step in range(config.d_steps):
+            try:
+                x_in, y_in = text_iterator.next()
+            except StopIteration:
+                eidx += 1
+                print 'Epoch', eidx
+                x_in, y_in = text_iterator.next()
+            x_in, x_mask_in, y_in, y_mask_in = prepare_data(x_in, y_in, maxlen=None)
+            fake_in, fake_mask_in = generator.generate_fakes(sess, x_in, x_mask_in)
+            total_loss += critic.run_gradient_step_simple(
+                            sess,
+                            x_in, x_mask_in,
+                            y_in, y_mask_in,
+                            fake_in, fake_mask_in)
+            uidx += 1
+            n_words += int(numpy.sum(y_mask_in))
+            n_sents += y_in.shape[1]
+            if config.dispFreq and uidx % config.dispFreq == 0:
+                duration = time.time() - last_time
+                disp_time = datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')
+                print disp_time, \
+                      'Epoch:', eidx, \
+                      'Update:', uidx, \
+                      'Loss/word:', total_loss/n_words, \
+                      'Words/sec:', n_words/duration, \
+                      'Sents/sec:', n_sents/duration
+                last_time = time.time()
+                total_loss = 0.
+                n_sents = 0
+                n_words = 0
+            if config.saveFreq and uidx % config.saveFreq == 0:
+                print >>sys.stderr, "Saving model...",
+                saver.save(sess, save_path=config.saveto, global_step=uidx)
+                print 'Done'
+
+        for g_step in range(config.g_steps):
+            print 'g_step', g_step
+            try:
+                x_in, _ = gen_text_iterator.next()
+            except StopIteration:
+                x_in, _ = gen_text_iterator.next()
+            y_dummy = numpy.zeros(shape=(len(x_in),1))
+            x_in, x_mask_in, _, _ = prepare_data(x_in, y_dummy, maxlen=None)
+            generator.run_gradient_step_simple(
+                        sess,
+                        x_in, x_mask_in)
 
 def translate(config, sess):
     model, saver = create_model(config, sess)
@@ -372,14 +465,31 @@ def parse_args():
                          help="Number of threads to use for beam search (default: %(default)s)")
     translate.add_argument('--translation_maxlen', type=int, default=200, metavar='INT',
                          help="Maximum length of translation output sentence (default: %(default)s)")
+    adversarial = parser.add_argument_group('adversarial parameters')
+    adversarial.add_argument('--adversarial', action='store_true', dest='adversarial',
+                            help='adversarial training')
+    adversarial.add_argument('--reward_is_increment_of_reward', action='store_true', dest='reward_is_increment_of_reward',
+                            help='reward_is_increment_of_reward')
+    adversarial.add_argument('--d_steps', type=int, default=5, metavar='INT',
+                         help="Number of update steps for critic")
+    adversarial.add_argument('--g_steps', type=int, default=1, metavar='INT',
+                         help="Number of update steps for generator")
+    adversarial.add_argument('--num_rollouts', type=int, default=5, metavar='INT',
+                         help="Number of rollouts")
+    adversarial.add_argument('--weight_clip', type=float, default=0.01, metavar='INT',
+                         help="Number of update steps for generator")
     config = parser.parse_args()
     return config
+
+
 
 if __name__ == "__main__":
     config = parse_args()
     print >>sys.stderr, config
     with tf.Session() as sess:
-        if config.translate_valid:
+        if config.adversarial:
+            train_wgan(config, sess)
+        elif config.translate_valid:
             translate(config, sess)
         elif config.run_validation:
             validate_helper(config, sess)

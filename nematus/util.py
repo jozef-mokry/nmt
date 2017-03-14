@@ -7,6 +7,7 @@ import json
 import cPickle as pkl
 import numpy
 
+
 # batch preparation
 def prepare_data(seqs_x, seqs_y, maxlen=None):
     # x: a list of sentences
@@ -53,6 +54,20 @@ def prepare_data(seqs_x, seqs_y, maxlen=None):
 
     return x, x_mask, y, y_mask
 
+def merge_batches(true_in, true_mask_in, fake_in, fake_mask_in):
+    true_len, n_true = true_in.shape
+    fake_len, n_fake = fake_in.shape
+    assert n_true == n_fake, (n_true, n_fake)
+    both_len, n_both = max(true_len, fake_len), (n_true+n_fake)
+    both_in = numpy.zeros((both_len, n_both), dtype=numpy.int32)
+    both_mask_in = numpy.zeros((both_len, n_both))
+    both_in[:true_len, :n_true] = true_in
+    both_in[:fake_len, n_true:] = fake_in
+    both_mask_in[:true_len, :n_true] = true_mask_in
+    both_mask_in[:fake_len, n_true:] = fake_mask_in
+    labels_in = numpy.ones((n_true+n_fake,), dtype=numpy.float32)
+    labels_in[n_true:] = -1
+    return both_in, both_mask_in, labels_in
 
 #json loads strings as unicode; we currently still work with Python 2 strings, and need conversion
 def unicode_to_utf8(d):

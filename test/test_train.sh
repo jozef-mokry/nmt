@@ -6,6 +6,7 @@
 # For a setup that preprocesses and trains a larger data set,
 # check https://github.com/rsennrich/wmt16-scripts/tree/master/sample
 
+mkdir models
 ../nematus/nmt.py \
   --model models/model.npz \
   --datasets data/corpus.en data/corpus.de \
@@ -20,4 +21,5 @@
   --batch_size 40 \
   --no_shuffle \
   --dispFreq 500 \
-  --finish_after 500
+  --finish_after 500 \
+  --objective CE

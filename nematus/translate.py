@@ -104,6 +104,8 @@ def main(models, source_file, saveto, save_alignment=None, k=5,
          normalize=False, n_process=5, chr_level=False, verbose=False, nbest=False, suppress_unk=False, a_json=False, print_word_probabilities=False, return_hyp_graph=False):
     # load model model_options
     options = []
+    import time
+    start_time = time.time()
     for model in models:
         options.append(load_config(model))
 
@@ -206,7 +208,7 @@ def main(models, source_file, saveto, save_alignment=None, k=5,
             samples, scores, word_probs, alignment, hyp_graph = trans
             if return_hyp_graph:
                 renderer = HypGraphRenderer(hyp_graph)
-		renderer.wordify(word_idict_trg)
+                renderer.wordify(word_idict_trg)
                 renderer.save_png(return_hyp_graph, detailed=True, highlight_best=True)
             order = numpy.argsort(scores)
             for j in order:
@@ -228,7 +230,7 @@ def main(models, source_file, saveto, save_alignment=None, k=5,
             samples, scores, word_probs, alignment, hyp_graph = trans
             if return_hyp_graph:
                 renderer = HypGraphRenderer(hyp_graph)
-		renderer.wordify(word_idict_trg)
+                renderer.wordify(word_idict_trg)
                 renderer.save_png(return_hyp_graph, detailed=True, highlight_best=True)
             saveto.write(_seqs2words(samples) + "\n")
             if print_word_probabilities:
@@ -244,6 +246,8 @@ def main(models, source_file, saveto, save_alignment=None, k=5,
                 print_matrix(alignment, save_alignment)
 
     sys.stderr.write('Done\n')
+    duration = time.time() - start_time
+    print "It took", duration, "seconds"
 
 
 if __name__ == "__main__":

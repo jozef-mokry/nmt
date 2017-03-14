@@ -1172,7 +1172,7 @@ def train(dim_word=100,  # word vector dimensionality
 
         for x, y in train:
             n_samples += len(x)
-            last_disp_samples += len(x)
+            #last_disp_samples += len(x)
             uidx += 1
             use_noise.set_value(1.)
 
@@ -1192,6 +1192,7 @@ def train(dim_word=100,  # word vector dimensionality
                     uidx -= 1
                     continue
 
+                last_disp_samples += numpy.sum(x_mask)
                 # compute cost, grads and copy grads to shared variables
                 cost = f_grad_shared(x, x_mask, y, y_mask)
 
