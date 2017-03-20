@@ -4,13 +4,11 @@ class Generator(StandardModel):
     def __init__(
             self, config,
             x, x_mask,
-            y, y_mask,
-            critic):
+            y, y_mask):
         self.rewards = tf.placeholder(
                         dtype=tf.float32,
                         name='rewards',
                         shape=(None, None))
-        self.critic = critic
         self.reward_is_increment_of_reward = config.reward_is_increment_of_reward 
         self.num_rollouts = config.num_rollouts
         with tf.name_scope("Generator"):
@@ -21,7 +19,6 @@ class Generator(StandardModel):
                     y=y,
                     y_mask=y_mask)
 
-            self._build_prefix_score(config)
 
     def _build_decoder(self, config):
         # use GenDecoder
@@ -59,7 +56,7 @@ class Generator(StandardModel):
         grad_vars = zip(clipped_grads, varss)
         self.apply_grads = self.optimizer.apply_gradients(grad_vars, global_step=self.t)
 
-    def _build_prefix_score(self, config):
+    def _build_prefix_score(self, config, critic):
         self.prefix_len = tf.placeholder(tf.int32, name='prefix_len', shape=())
         self.rollouts = self.decoder.sample_with_fixed_prefix(self.prefix_len, self.y)
         lengths = tf.reduce_sum(
@@ -67,7 +64,7 @@ class Generator(StandardModel):
                     axis=0)
         lengths = tf.where(tf.equal(self.rollouts[-1], 0), lengths + 1, lengths) #Add 1 for eos if reached
         rollouts_mask = tf.transpose(tf.sequence_mask(lengths, dtype=tf.float32)) 
-        scores = self.critic.score(self.rollouts, rollouts_mask, back_prop=False)
+        scores = critic.score(self.rollouts, rollouts_mask, back_prop=False)
         self.prefix_score = scores
 
     def run_gradient_step_simple(self, sess, x_in, x_mask_in):
@@ -174,12 +171,10 @@ class Critic(StandardModel):
     def __init__(
             self, config,
             x, x_mask, 
-            y, y_mask):
+            y, y_mask,
+            generator):
 
-        self.labels = tf.placeholder(
-                        dtype=tf.float32,
-                        name='labels',
-                        shape=(None,))
+        self.generator = generator
         with tf.name_scope("Critic"):
             super(Critic, self).__init__(
                     config,
@@ -195,15 +190,23 @@ class Critic(StandardModel):
             self.decoder = CriticDecoder(config, self.ctx, self.x_mask)
 
     def _build_loss(self, config):
+        fakes = self.generator.decoder.sample()
+        lengths = tf.reduce_sum(
+                    tf.cast(tf.not_equal(fakes, 0), dtype=tf.float32),
+                    axis=0)
+        lengths = tf.where(tf.equal(fakes[-1], 0), lengths + 1, lengths) #Add 1 for eos if reached
+        fakes_mask = tf.transpose(tf.sequence_mask(lengths, dtype=tf.float32)) 
+
         with tf.name_scope("decoder"):
-            scores = self.decoder.score(
+            scores = self.decoder.score_true_and_fake(
                             self.y,
                             self.y_mask,
-                            back_prop=True)
-            loss = scores * self.labels # labels are -1, 1
-            # assume same number of true and fake
-            # reduce_mean divides sum by (n_true+n_fake) == 2*n_true == 2*n_fake
-            self.mean_loss = -2*tf.reduce_mean(loss)
+                            fakes,
+                            fakes_mask)
+            true_scores, fake_scores = tf.split(scores, 2, axis=0)
+            true_scores_mean = tf.reduce_mean(true_scores)
+            fake_scores_mean = tf.reduce_mean(fake_scores)
+            self.mean_loss = -true_scores_mean + fake_scores_mean
 
     def _build_optimizer(self, config):
         # Use RMSProp
@@ -226,19 +229,11 @@ class Critic(StandardModel):
     def run_gradient_step_simple(
             self, sess,
             x_in, x_mask_in,
-            true_in, true_mask_in,
-            fake_in, fake_mask_in):
-        both_in, both_mask_in, labels_in = merge_batches(
-                                            true_in, true_mask_in,
-                                            fake_in, fake_mask_in)
-        x_in, x_mask_in, _ = merge_batches(
-                                x_in, x_mask_in,
-                                x_in, x_mask_in)
+            true_in, true_mask_in):
         inn = {self.x: x_in,
                self.x_mask: x_mask_in,
-               self.y: both_in,
-               self.y_mask: both_mask_in,
-               self.labels: labels_in}
+               self.y: true_in,
+               self.y_mask: true_mask_in}
         _, mean_loss, _ = sess.run([self.apply_grads, self.mean_loss, self.clip_vars], inn)
         return mean_loss
 
@@ -268,7 +263,6 @@ class CriticDecoder(Decoder):
                             paddings=[[1,0],[0,0],[0,0]]) # prepend zeros
 
         gates_x, proposal_x = self.grustep1.precompute_from_x(y_embs)
-        # Replace with tf.while_loop
 
         def cond(i, prev_state):
             return tf.less(i, seq_len)
@@ -286,12 +280,80 @@ class CriticDecoder(Decoder):
             state = tf.where(tf.equal(y_mask[i], 0.), prev_state, state)
             return i+1, state
 
-        #TODO: init_state is only for batch, not 2*batch
         _, last_state = tf.while_loop(
                             cond=cond,
                             body=body,
                             loop_vars=[tf.constant(0), self.init_state],
                             back_prop=back_prop)
+
+        hidden = self.state_to_hidden_layer.forward(last_state)
+        score = self.hidden_to_score_layer.forward(hidden)
+        score = tf.squeeze(score, axis=1)
+        return score
+
+    def _pad_and_concat(self, x, y):
+        #concat x and y along axis=1, and pad to same length along axis0
+        seq_len_x = tf.shape(x)[0]
+        seq_len_y = tf.shape(y)[0]
+
+        def pad_x():
+            x_pad = tf.pad(x, [[0,seq_len_y - seq_len_x], [0,0]], mode='CONSTANT')
+            return x_pad, y
+        def pad_y():
+            y_pad = tf.pad(y, [[0,seq_len_x - seq_len_y], [0,0]], mode='CONSTANT')
+            return x, y_pad
+        x, y = tf.cond(seq_len_x < seq_len_y, pad_x, pad_y)
+        out = tf.concat([x,y], axis=1)
+        return out
+
+    def _repeat_init_state(self):
+        self.init_state_rep = tf.concat([self.init_state, self.init_state], axis=0)
+        self.attstep_rep = AttentionStep(
+                            context=self.context,
+                            context_state_size=2*self.state_size,
+                            context_mask=self.x_mask,
+                            state_size=self.state_size,
+                            hidden_size=2*self.state_size,
+                            reuse_from=self.attstep)
+        self.attstep_rep.context = tf.concat([self.attstep_rep.context,self.attstep_rep.context], axis=1)   
+        self.attstep_rep.context_mask = tf.concat([self.attstep_rep.context_mask,self.attstep_rep.context_mask], axis=1)  
+        self.attstep_rep.hidden_from_context = tf.concat([self.attstep_rep.hidden_from_context,self.attstep_rep.hidden_from_context], axis=1)  
+
+    def score_true_and_fake(self, y, y_mask, fake, fake_mask):
+        y = self._pad_and_concat(y, fake)
+        y_mask = self._pad_and_concat(y_mask, fake_mask)
+        self._repeat_init_state()
+        with tf.name_scope("y_embeddings_layer"):
+            seq_len = tf.shape(y)[0]
+            y_but_last = tf.slice(y, [0,0], [seq_len - 1, -1])
+            y_embs = self.y_emb_layer.forward(y_but_last)
+            y_embs = tf.pad(y_embs,
+                            mode='CONSTANT',
+                            paddings=[[1,0],[0,0],[0,0]]) # prepend zeros
+
+        gates_x, proposal_x = self.grustep1.precompute_from_x(y_embs)
+
+        def cond(i, prev_state):
+            return tf.less(i, seq_len)
+
+        def body(i, prev_state):
+            gates_x2d = gates_x[i]
+            proposal_x2d = proposal_x[i]
+            state = self.grustep1.forward(
+                        prev_state,
+                        gates_x=gates_x2d,
+                        proposal_x=proposal_x2d)
+            att_ctx = self.attstep_rep.forward(state) 
+            state = self.grustep2.forward(state, att_ctx)
+            # Use y_mask here - because the last state must be correct
+            state = tf.where(tf.equal(y_mask[i], 0.), prev_state, state)
+            return i+1, state
+
+        _, last_state = tf.while_loop(
+                            cond=cond,
+                            body=body,
+                            loop_vars=[tf.constant(0), self.init_state_rep],
+                            back_prop=True)
 
         hidden = self.state_to_hidden_layer.forward(last_state)
         score = self.hidden_to_score_layer.forward(hidden)

@@ -200,14 +200,13 @@ def train_wgan(config, sess):
     x_mask = tf.placeholder(tf.float32, shape=(None,None))
     y = tf.placeholder(tf.int32, shape=(None,None))
     y_mask = tf.placeholder(tf.float32, shape=(None,None))
-    print 'Critic...',
-    critic = Critic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask)
-    print 'Done'
     print 'Generator...',
-    generator = Generator(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask, critic=critic)
-
-
+    generator = Generator(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask)
     print 'Done'
+    print 'Critic...',
+    critic = Critic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask, generator=generator)
+    print 'Done'
+    generator._build_prefix_score(config, critic)
     saver = tf.train.Saver(max_to_keep=None)
     text_iterator, _ = load_data(config)
     gen_text_iterator, _ = load_data(config)
@@ -232,12 +231,10 @@ def train_wgan(config, sess):
                 print 'Epoch', eidx
                 x_in, y_in = text_iterator.next()
             x_in, x_mask_in, y_in, y_mask_in = prepare_data(x_in, y_in, maxlen=None)
-            fake_in, fake_mask_in = generator.generate_fakes(sess, x_in, x_mask_in)
             total_loss += critic.run_gradient_step_simple(
                             sess,
                             x_in, x_mask_in,
-                            y_in, y_mask_in,
-                            fake_in, fake_mask_in)
+                            y_in, y_mask_in)
             uidx += 1
             n_words += int(numpy.sum(y_mask_in))
             n_sents += y_in.shape[1]

@@ -4,6 +4,8 @@ import numpy
 
 class Decoder(object):
     def __init__(self, config, context, x_mask):
+        self.context = context
+        self.x_mask = x_mask
         with tf.name_scope("next_word_predictor"):
             self.predictor = Predictor(config)
 

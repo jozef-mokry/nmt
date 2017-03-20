@@ -220,19 +220,26 @@ class AttentionStep(object):
                  context_state_size,
                  context_mask,
                  state_size,
-                 hidden_size):
-        self.state_to_hidden = tf.Variable(
-                                norm_weight(state_size, hidden_size),
-                                name='state_to_hidden')
-        self.context_to_hidden = tf.Variable( #TODO: Nematus uses ortho_weight here - important?
-                                    norm_weight(context_state_size, hidden_size), 
-                                    name='context_to_hidden')
-        self.hidden_bias = tf.Variable(
-                            numpy.zeros((hidden_size,)).astype('float32'),
-                            name='hidden_bias')
-        self.hidden_to_score = tf.Variable(
-                                norm_weight(hidden_size, 1),
-                                name='hidden_to_score')
+                 hidden_size,
+                 reuse_from=None):
+        if reuse_from is None:
+            self.state_to_hidden = tf.Variable(
+                                    norm_weight(state_size, hidden_size),
+                                    name='state_to_hidden')
+            self.context_to_hidden = tf.Variable( #TODO: Nematus uses ortho_weight here - important?
+                                        norm_weight(context_state_size, hidden_size), 
+                                        name='context_to_hidden')
+            self.hidden_bias = tf.Variable(
+                                numpy.zeros((hidden_size,)).astype('float32'),
+                                name='hidden_bias')
+            self.hidden_to_score = tf.Variable(
+                                    norm_weight(hidden_size, 1),
+                                    name='hidden_to_score')
+        else:
+            self.state_to_hidden = reuse_from.state_to_hidden
+            self.context_to_hidden = reuse_from.context_to_hidden
+            self.hidden_bias = reuse_from.hidden_bias
+            self.hidden_to_score = reuse_from.hidden_to_score
         
         self.context = context
         self.context_mask = context_mask
