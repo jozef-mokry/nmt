@@ -194,6 +194,23 @@ def reload_generator(sess, config):
     gen_saver = tf.train.Saver(var_list=name_mapping)
     gen_saver.restore(sess, os.path.abspath(config.reload))
 
+def scale_critics_params(sess, config):
+    critic_vars = tf.get_collection(
+                        key=tf.GraphKeys.TRAINABLE_VARIABLES,
+                        scope="Critic")
+    ops = []
+    for v in critic_vars:
+        print 'Clipping', v.name,
+        v_abs = tf.abs(v)
+        v_max = tf.reduce_max(v_abs, axis=0, keep_dims=True)
+        v_max = tf.where(tf.equal(v_max, 0.), v_max + 1, v_max)
+        v_new = v / v_max
+        v_new *= 0.5*config.weight_clip
+        sess.run(tf.assign(v, v_new))
+        print 'Done'
+    print 'Running ops'
+
+
 def train_wgan(config, sess):
     print "Train WGAN"
     x = tf.placeholder(tf.int32, shape=(None,None))
@@ -215,6 +232,7 @@ def train_wgan(config, sess):
     init_op = tf.global_variables_initializer()
     sess.run(init_op)
     reload_generator(sess, config)
+    scale_critics_params(sess, config)
     last_time = time.time()
     total_loss = 0.
     true_scores = 0.
