@@ -231,7 +231,8 @@ def train_wgan(config, sess):
 
     init_op = tf.global_variables_initializer()
     sess.run(init_op)
-    reload_generator(sess, config)
+    if config.reload_generator:
+        reload_generator(sess, config)
     scale_critics_params(sess, config)
     last_time = time.time()
     total_loss = 0.
@@ -505,6 +506,8 @@ def parse_args():
                          help="Number of rollouts")
     adversarial.add_argument('--weight_clip', type=float, default=0.01, metavar='INT',
                          help="Number of update steps for generator")
+    adversarial.add_argument('--no_generator_reload', action="store_false", dest="reload_generator",
+                         help="disable shuffling of training data (for each epoch)")
     config = parser.parse_args()
     return config
 
