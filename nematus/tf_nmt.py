@@ -89,7 +89,7 @@ def read_all_lines(config, path):
 def train(config, sess):
     model, saver = create_model(config, sess)
 
-    x,x_mask,y,y_mask = model.get_score_inputs()
+    x,x_mask,y,y_mask,train_weights = model.get_score_inputs()
     apply_grads = model.get_apply_grads()
     t = model.get_global_step()
     loss_per_sentence = model.get_loss()
@@ -111,13 +111,13 @@ def train(config, sess):
     STOP = False
     for eidx in xrange(config.max_epochs):
         print 'Starting epoch', eidx
-        for source_sents, target_sents in text_iterator:
+        for source_sents, target_sents, train_weights_in in text_iterator:
             x_in, x_mask_in, y_in, y_mask_in = prepare_data(source_sents, target_sents, maxlen=None)
             if x_in is None:
                 print >>sys.stderr, 'Minibatch with zero sample under length ', config.maxlen
                 continue
             (seqLen, batch_size) = x_in.shape
-            inn = {x:x_in, y:y_in, x_mask:x_mask_in, y_mask:y_mask_in}
+            inn = {x:x_in, y:y_in, x_mask:x_mask_in, y_mask:y_mask_in, train_weights:train_weights_in}
             out = [t, apply_grads, mean_loss]
             if config.summaryFreq and uidx % config.summaryFreq == 0:
                 out += [merged]
@@ -247,6 +247,7 @@ def validate(sess, valid_text_iterator, model):
     loss_per_sentence = model.get_loss()
     for x_v, y_v in valid_text_iterator:
         x_v_in, x_v_mask_in, y_v_in, y_v_mask_in = prepare_data(x_v, y_v, maxlen=None)
+        print >>sys.stderr, x_v_in.shape, y_v_in.shape
         feeds = {x:x_v_in, x_mask:x_v_mask_in, y:y_v_in, y_mask:y_v_mask_in}
         loss_per_sentence_out = sess.run(loss_per_sentence, feed_dict=feeds)
         total_loss += loss_per_sentence_out.sum()
@@ -260,6 +261,7 @@ def validate_helper(config, sess):
     model, saver = create_model(config, sess)
     valid_text_iterator = TextIterator(
                         source=config.valid_source_dataset,
+                        skip_empty=True,
                         target=config.valid_target_dataset,
                         source_dicts=[config.source_vocab],
                         target_dict=config.target_vocab,

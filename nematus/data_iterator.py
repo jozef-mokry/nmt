@@ -21,7 +21,8 @@ class TextIterator:
                  skip_empty=False,
                  shuffle_each_epoch=False,
                  sort_by_length=True,
-                 maxibatch_size=20):
+                 maxibatch_size=20,
+                 use_train_weights=False):
         if shuffle_each_epoch:
             self.source_orig = source
             self.target_orig = target
@@ -57,6 +58,8 @@ class TextIterator:
 
         self.source_buffer = []
         self.target_buffer = []
+        self.weight_buffer = []
+        self.use_train_weights = use_train_weights
         self.k = batch_size * maxibatch_size
         
 
@@ -80,14 +83,26 @@ class TextIterator:
 
         source = []
         target = []
+        weights = []
 
         # fill buffer, if it's empty
         assert len(self.source_buffer) == len(self.target_buffer), 'Buffer size mismatch!'
+        if self.use_train_weights:
+            assert len(self.source_buffer) == len(self.weight_buffer), 'Buffer size mismatch! 2'
 
         if len(self.source_buffer) == 0:
             for ss in self.source:
+                tt = self.target.readline()
+
+                if self.use_train_weights:
+                    ww_s, ss = ss.split(" ||| ", 1)
+                    ww_t, tt = tt.split(" ||| ", 1)
+                    assert ww_s == ww_t, 'Weights in source and target file do not agree!'
+
+                    ww = ww_s
+
                 ss = ss.split()
-                tt = self.target.readline().split()
+                tt = tt.split()
                 
                 if self.skip_empty and (len(ss) == 0 or len(tt) == 0):
                     continue
@@ -96,6 +111,9 @@ class TextIterator:
 
                 self.source_buffer.append(ss)
                 self.target_buffer.append(tt)
+                if self.use_train_weights:
+                    self.weight_buffer.append(ww)
+
                 if len(self.source_buffer) == self.k:
                     break
 
@@ -115,9 +133,15 @@ class TextIterator:
                 self.source_buffer = _sbuf
                 self.target_buffer = _tbuf
 
+                if self.use_train_weights:
+                    _wbuf = [self.weight_buffer[i] for i in tidx]
+                    self.weight_buffer = _wbuf
+
             else:
                 self.source_buffer.reverse()
                 self.target_buffer.reverse()
+                if self.use_train_weights:
+                    self.weight_buffer.reverse()
 
 
         try:
@@ -135,7 +159,7 @@ class TextIterator:
                     tmp.append(w)
                 ss = tmp
 
-                # read from source file and map to word index
+                # read from target file and map to word index
                 tt = self.target_buffer.pop()
                 tt = [self.target_dict[w] if w in self.target_dict else 1
                       for w in tt]
@@ -145,10 +169,18 @@ class TextIterator:
                 source.append(ss)
                 target.append(tt)
 
+                if self.use_train_weights:
+                    # read from the weight buffer
+                    ww = float(self.weight_buffer.pop())
+                    weights.append(ww)
+
                 if len(source) >= self.batch_size or \
                         len(target) >= self.batch_size:
                     break
         except IOError:
             self.end_of_data = True
 
-        return source, target
+        if self.use_train_weights:
+            return source, target, weights
+        else:
+            return source, target, [1]*len(source)
