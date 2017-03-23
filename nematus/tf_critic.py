@@ -204,9 +204,9 @@ class Critic(StandardModel):
                             fakes,
                             fakes_mask)
             true_scores, fake_scores = tf.split(scores, 2, axis=0)
-            true_scores_mean = tf.reduce_mean(true_scores)
-            fake_scores_mean = tf.reduce_mean(fake_scores)
-            self.mean_loss = -true_scores_mean + fake_scores_mean
+            self.true_scores_mean = tf.reduce_mean(true_scores)
+            self.fake_scores_mean = tf.reduce_mean(fake_scores)
+            self.mean_loss = -self.true_scores_mean + self.fake_scores_mean
 
     def _build_optimizer(self, config):
         # Use RMSProp
@@ -234,8 +234,8 @@ class Critic(StandardModel):
                self.x_mask: x_mask_in,
                self.y: true_in,
                self.y_mask: true_mask_in}
-        _, mean_loss, _ = sess.run([self.apply_grads, self.mean_loss, self.clip_vars], inn)
-        return mean_loss
+        _, mean_loss, _, true_scores_mean, fake_scores_mean = sess.run([self.apply_grads, self.mean_loss, self.clip_vars, self.true_scores_mean, self.fake_scores_mean], inn)
+        return mean_loss, true_scores_mean, fake_scores_mean
 
     def score(self, y, y_mask, back_prop):
         return self.decoder.score(y, y_mask, back_prop)

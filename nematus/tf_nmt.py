@@ -217,6 +217,8 @@ def train_wgan(config, sess):
     reload_generator(sess, config)
     last_time = time.time()
     total_loss = 0.
+    true_scores = 0.
+    fake_scores = 0.
     n_words = 0
     n_sents = 0
     eidx = 0
@@ -231,10 +233,16 @@ def train_wgan(config, sess):
                 print 'Epoch', eidx
                 x_in, y_in = text_iterator.next()
             x_in, x_mask_in, y_in, y_mask_in = prepare_data(x_in, y_in, maxlen=None)
-            total_loss += critic.run_gradient_step_simple(
-                            sess,
-                            x_in, x_mask_in,
-                            y_in, y_mask_in)
+            mean_loss, true_scores_mean, fake_scores_mean= critic.run_gradient_step_simple(
+                                                            sess,
+                                                            x_in, x_mask_in,
+                                                            y_in, y_mask_in)
+            total_loss += mean_loss*y_in.shape[1]
+            true_scores += true_scores_mean*y_in.shape[1]
+            fake_scores += fake_scores_mean*y_in.shape[1]
+                          
+                          
+                          
             uidx += 1
             n_words += int(numpy.sum(y_mask_in))
             n_sents += y_in.shape[1]
@@ -244,11 +252,15 @@ def train_wgan(config, sess):
                 print disp_time, \
                       'Epoch:', eidx, \
                       'Update:', uidx, \
-                      'Loss/word:', total_loss/n_words, \
+                      'Loss/sent:', total_loss/n_sents, \
+                      'true_score/sent:', true_scores/n_sents, \
+                      'fake_score/sent:', fake_scores/n_sents, \
                       'Words/sec:', n_words/duration, \
-                      'Sents/sec:', n_sents/duration
+                      'True Sents/sec:', n_sents/duration
                 last_time = time.time()
                 total_loss = 0.
+                true_scores = 0.
+                fake_scores = 0.
                 n_sents = 0
                 n_words = 0
             if config.saveFreq and uidx % config.saveFreq == 0:
