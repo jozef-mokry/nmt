@@ -350,7 +350,7 @@ class StandardModel(object):
                         dtype=tf.float32,
                         name='y_mask',
                         shape=(seqLen, batch_size))
-        self.weights = tf.placeholder(
+        self.qual_weights = tf.placeholder(
                         dtype=tf.float32,
                         name='train_weights',
                         shape=(batch_size,))
@@ -366,7 +366,7 @@ class StandardModel(object):
         with tf.name_scope("loss"):
             self.loss_layer = Masked_cross_entropy_loss(self.y, self.y_mask)
             self.loss_per_sentence = self.loss_layer.forward(self.logits)
-            self.weighted_loss_per_sentence =  self.loss_per_sentence * self.weights
+            self.weighted_loss_per_sentence =  self.loss_per_sentence * self.qual_weights
             self.mean_loss = tf.reduce_mean(self.weighted_loss_per_sentence, keep_dims=False)
 
         #with tf.name_scope("optimizer"):
@@ -383,7 +383,7 @@ class StandardModel(object):
         self.beam_size, self.beam_ys, self.parents, self.cost = None, None, None, None
 
     def get_score_inputs(self):
-        return self.x, self.x_mask, self.y, self.y_mask, self.weights
+        return self.x, self.x_mask, self.y, self.y_mask, self.qual_weights
     
     def get_loss(self):
         return self.loss_per_sentence

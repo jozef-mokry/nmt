@@ -39,7 +39,8 @@ def load_data(config):
                         skip_empty=True,
                         shuffle_each_epoch=config.shuffle_each_epoch,
                         sort_by_length=config.sort_by_length,
-                        maxibatch_size=config.maxibatch_size)
+                        maxibatch_size=config.maxibatch_size,
+                        use_qual_weights=config.use_qual_weights)
 
     if config.validFreq:
         valid_text_iterator = TextIterator(
@@ -89,7 +90,7 @@ def read_all_lines(config, path):
 def train(config, sess):
     model, saver = create_model(config, sess)
 
-    x,x_mask,y,y_mask,train_weights = model.get_score_inputs()
+    x,x_mask,y,y_mask,qual_weights = model.get_score_inputs()
     apply_grads = model.get_apply_grads()
     t = model.get_global_step()
     loss_per_sentence = model.get_loss()
@@ -111,13 +112,13 @@ def train(config, sess):
     STOP = False
     for eidx in xrange(config.max_epochs):
         print 'Starting epoch', eidx
-        for source_sents, target_sents, train_weights_in in text_iterator:
+        for source_sents, target_sents, qual_weights_in in text_iterator:
             x_in, x_mask_in, y_in, y_mask_in = prepare_data(source_sents, target_sents, maxlen=None)
             if x_in is None:
                 print >>sys.stderr, 'Minibatch with zero sample under length ', config.maxlen
                 continue
             (seqLen, batch_size) = x_in.shape
-            inn = {x:x_in, y:y_in, x_mask:x_mask_in, y_mask:y_mask_in, train_weights:train_weights_in}
+            inn = {x:x_in, y:y_in, x_mask:x_mask_in, y_mask:y_mask_in, qual_weights:qual_weights_in}
             out = [t, apply_grads, mean_loss]
             if config.summaryFreq and uidx % config.summaryFreq == 0:
                 out += [merged]
@@ -336,6 +337,8 @@ def parse_args():
                          help='size of maxibatch (number of minibatches that are sorted by length) (default: %(default)s)')
     training.add_argument('--use_layer_norm', action="store_true", dest="use_layer_norm",
                          help="Set to use layer normalization in encoder and decoder")
+    training.add_argument('--use_qual_weights', action="store_true", dest="use_qual_weights",
+                         help="Use provided data weights when training")
 
     validation = parser.add_argument_group('validation parameters')
     validation.add_argument('--valid_source_dataset', type=str, default=None, metavar='PATH', 
