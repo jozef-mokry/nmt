@@ -244,12 +244,11 @@ def validate(sess, valid_text_iterator, model):
     costs = []
     total_loss = 0.
     total_seen = 0
-    x,x_mask,y,y_mask = model.get_score_inputs()
+    x,x_mask,y,y_mask,qual_weights = model.get_score_inputs()
     loss_per_sentence = model.get_loss()
-    for x_v, y_v in valid_text_iterator:
+    for x_v, y_v, qual_weights_in in valid_text_iterator:
         x_v_in, x_v_mask_in, y_v_in, y_v_mask_in = prepare_data(x_v, y_v, maxlen=None)
-        print >>sys.stderr, x_v_in.shape, y_v_in.shape
-        feeds = {x:x_v_in, x_mask:x_v_mask_in, y:y_v_in, y_mask:y_v_mask_in}
+        feeds = {x:x_v_in, x_mask:x_v_mask_in, y:y_v_in, y_mask:y_v_mask_in, qual_weights:qual_weights_in}
         loss_per_sentence_out = sess.run(loss_per_sentence, feed_dict=feeds)
         total_loss += loss_per_sentence_out.sum()
         total_seen += x_v_in.shape[1]
