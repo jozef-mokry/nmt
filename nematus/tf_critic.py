@@ -182,6 +182,7 @@ class Critic(StandardModel):
                     x_mask=x_mask,
                     y=y,
                     y_mask=y_mask)
+            self.score_per_sentence = self.score(y, y_mask, back_prop=False)
 
     def _build_decoder(self, config):
         with tf.name_scope("encoder"):
@@ -239,6 +240,13 @@ class Critic(StandardModel):
 
     def score(self, y, y_mask, back_prop):
         return self.decoder.score(y, y_mask, back_prop)
+
+    def get_score_per_sentence(self, sess, x_in, x_mask_in, y_in, y_mask_in):
+        inn = { self.x: x_in,
+                self.y: y_in,
+                self.x_mask: x_mask_in,
+                self.y_mask: y_mask_in}
+        return sess.run(self.score_per_sentence, feed_dict=inn)
 
 class CriticDecoder(Decoder):    
     def __init__(self, config, context, x_mask):

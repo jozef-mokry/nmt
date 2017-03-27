@@ -210,9 +210,7 @@ def scale_critics_params(sess, config):
         print 'Done'
     print 'Running ops'
 
-
-def train_wgan(config, sess):
-    print "Train WGAN"
+def create_wgan(config):
     x = tf.placeholder(tf.int32, shape=(None,None))
     x_mask = tf.placeholder(tf.float32, shape=(None,None))
     y = tf.placeholder(tf.int32, shape=(None,None))
@@ -224,24 +222,43 @@ def train_wgan(config, sess):
     critic = Critic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask, generator=generator)
     print 'Done'
     generator._build_prefix_score(config, critic)
+
     saver = tf.train.Saver(max_to_keep=None)
-    text_iterator, _ = load_data(config)
+    if not config.reload_critic_and_generator:
+        init_op = tf.global_variables_initializer()
+        print >>sys.stderr, "Initializing params...",
+        sess.run(init_op)
+        print >>sys.stderr, 'Done'
+        print >>sys.stderr, 'Clipping critic...',
+        scale_critics_params(sess, config)
+        print >>sys.stderr, 'Done'
+        if config.reload_generator:
+            print >>sys.stderr, 'Reloading generator...',
+            reload_generator(sess, config)
+            print >>sys.stderr, 'Done'
+    else:
+        print >>sys.stderr, "Reloading critic and generator from: ", config.reload_critic_and_generator,
+        saver.restore(sess, os.path.abspath(config.reload_critic_and_generator))
+    print >>sys.stderr, 'Done'
+
+    return generator, critic, saver
+
+def train_wgan(config, sess):
+    print "Train WGAN"
+    generator, critic, saver = create_wgan(config)
+    text_iterator, valid_text_iterator = load_data(config)
     gen_text_iterator, _ = load_data(config)
     source_to_num, target_to_num, num_to_source, num_to_target = load_dictionaries(config)
 
-    init_op = tf.global_variables_initializer()
-    sess.run(init_op)
-    if config.reload_generator:
-        reload_generator(sess, config)
-    scale_critics_params(sess, config)
     last_time = time.time()
     total_loss = 0.
     true_scores = 0.
     fake_scores = 0.
     n_words = 0
     n_sents = 0
+    uidx = sess.run(critic.t)
+    print 'uidx is', uidx
     eidx = 0
-    uidx = 0
     print 'Epoch', eidx
     while eidx < config.max_epochs:
         for d_step in range(config.d_steps):
@@ -286,6 +303,8 @@ def train_wgan(config, sess):
                 print >>sys.stderr, "Saving model...",
                 saver.save(sess, save_path=config.saveto, global_step=uidx)
                 print 'Done'
+            if config.validFreq and uidx % config.validFreq == 0:
+                wgan_validate(config, sess, generator, critic, valid_text_iterator)
 
         for g_step in range(config.g_steps):
             print 'g_step', g_step
@@ -298,6 +317,76 @@ def train_wgan(config, sess):
             generator.run_gradient_step_simple(
                         sess,
                         x_in, x_mask_in)
+
+def wgan_validate(config, sess, generator, critic, text_iterator):
+    all_true, all_fake = [], []
+    sent_true, sent_fake = [], []
+    total_seen = 0
+    for xx, yy in text_iterator:
+        x_in, x_mask_in, y_in, y_mask_in = prepare_data(xx, yy, maxlen=None)
+        samples, samples_mask = generator.generate_fakes(sess, x_in, x_mask_in)
+        true_scores = critic.get_score_per_sentence(sess, x_in, x_mask_in, y_in, y_mask_in)
+        fake_scores = critic.get_score_per_sentence(sess, x_in, x_mask_in, samples, samples_mask)
+        assert x_in.shape[1] == y_in.shape[1] == samples.shape[1] == samples_mask.shape[1]
+        assert true_scores.shape == fake_scores.shape == (x_in.shape[1],)
+        all_true += list(true_scores)
+        all_fake += list(fake_scores)
+        sent_true += list(y_in.T)
+        sent_fake += list(samples.T)
+        total_seen += len(xx)
+        print 'Seen {}'.format(total_seen)
+    assert total_seen == len(all_true)
+    all_true = numpy.array(all_true)
+    all_fake = numpy.array(all_fake)
+    accuracy = (all_true > all_fake).mean()
+    pos_true = (all_true > 0).mean()
+    neg_fake = (all_fake < 0).mean()
+    total_loss = (-all_true + all_fake).sum()
+    print 'Validation loss (AVG/SUM/N_SENT/ACC/POS_TRUE/NEG_FAKE):', total_loss/total_seen, total_loss, total_seen, accuracy, pos_true, neg_fake
+    print 'True: mean/std/min/max {}/{}/{}/{}'.format(
+                                                all_true.mean(),
+                                                all_true.std(),
+                                                all_true.min(),
+                                                all_true.max())
+    print 'Fake: mean/std/min/max {}/{}/{}/{}'.format(
+                                                all_fake.mean(),
+                                                all_fake.std(),
+                                                all_fake.min(),
+                                                all_fake.max())
+    return all_true, all_fake, sent_true, sent_fake
+
+def wgan_validate_helper(config, sess):
+    generator, critic, _ = create_wgan(config)
+    valid_text_iterator = TextIterator(
+                        source=config.valid_source_dataset,
+                        target=config.valid_target_dataset,
+                        source_dicts=[config.source_vocab],
+                        target_dict=config.target_vocab,
+                        batch_size=config.valid_batch_size,
+                        maxlen=config.validation_maxlen,
+                        n_words_source=config.source_vocab_size,
+                        n_words_target=config.target_vocab_size,
+                        shuffle_each_epoch=False,
+                        sort_by_length=False, #TODO
+                        maxibatch_size=config.maxibatch_size)
+
+    all_true, all_fake, sent_true, sent_fake = wgan_validate(
+                                                config,
+                                                sess,
+                                                generator,
+                                                critic,
+                                                valid_text_iterator)
+    assert len(all_true) == len(sent_true)
+    assert len(all_fake) == len(sent_fake)
+    source_to_num, target_to_num, num_to_source, num_to_target = load_dictionaries(config)
+    print 'True sentences'
+    for score, sent in zip(all_true, sent_true):
+        print "{:<20} : {}".format(score, seqs2words(sent, num_to_target))
+    print 'Fake sentences'
+    for score, sent in zip(all_fake, sent_fake):
+        print "{:<20} : {}".format(score, seqs2words(sent, num_to_target))
+
+
 
 def translate(config, sess):
     model, saver = create_model(config, sess)
@@ -507,7 +596,9 @@ def parse_args():
     adversarial.add_argument('--weight_clip', type=float, default=0.01, metavar='INT',
                          help="Number of update steps for generator")
     adversarial.add_argument('--no_generator_reload', action="store_false", dest="reload_generator",
-                         help="disable shuffling of training data (for each epoch)")
+                         help="")
+    adversarial.add_argument('--reload_critic_and_generator', type=str, default=None, metavar='PATH',
+                         help="load existing critcit and generator from this path")
     config = parser.parse_args()
     return config
 
@@ -518,7 +609,10 @@ if __name__ == "__main__":
     print >>sys.stderr, config
     with tf.Session() as sess:
         if config.adversarial:
-            train_wgan(config, sess)
+            if config.run_validation:
+                wgan_validate_helper(config, sess)
+            else:
+                train_wgan(config, sess)
         elif config.translate_valid:
             translate(config, sess)
         elif config.run_validation:
