@@ -214,7 +214,12 @@ class Critic(StandardModel):
         critic_vars = tf.get_collection(
                             key=tf.GraphKeys.TRAINABLE_VARIABLES,
                             scope="Critic")
-        self.optimizer = tf.train.RMSPropOptimizer(learning_rate=config.learning_rate)
+        if config.use_adam:
+            print 'Optimizer for critic is Adam'
+            self.optimizer = tf.train.AdamOptimizer(learning_rate=config.learning_rate)
+        else:
+            print 'Optimizer for critic is RMSprop'
+            self.optimizer = tf.train.RMSPropOptimizer(learning_rate=config.learning_rate)
         self.t = tf.Variable(0, name='time', trainable=False, dtype=tf.int32)
         grad_vars = self.optimizer.compute_gradients(
                             self.mean_loss, 

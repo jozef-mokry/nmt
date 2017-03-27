@@ -597,6 +597,8 @@ def parse_args():
                          help="Number of update steps for generator")
     adversarial.add_argument('--no_generator_reload', action="store_false", dest="reload_generator",
                          help="")
+    adversarial.add_argument('--use_adam', action="store_true", dest="use_adam",
+                         help="")
     adversarial.add_argument('--reload_critic_and_generator', type=str, default=None, metavar='PATH',
                          help="load existing critcit and generator from this path")
     config = parser.parse_args()
