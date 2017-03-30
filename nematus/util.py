@@ -33,7 +33,8 @@ def prepare_data(seqs_x, seqs_y, maxlen=None):
             return None, None, None, None
 
     n_samples = len(seqs_x)
-    n_factors = len(seqs_x[0][0])
+    #n_factors = len(seqs_x[0][0])
+    n_factors = 1
     assert n_factors == 1
     maxlen_x = numpy.max(lengths_x) + 1
     maxlen_y = numpy.max(lengths_y) + 1
