@@ -1,0 +1,11 @@
+#!/bin/sh
+
+if [ $# -lt 2 ]
+then
+    echo "Error in $0 - Invalid Argument Count"
+    echo "Syntax: $0 refset testset"
+    exit
+fi
+
+/home/s1206139/selfattention/mosesdecoder/scripts/generic/multi-bleu.perl $1 < $2
+
