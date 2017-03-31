@@ -5,6 +5,7 @@ Layer definitions
 from tf_initializers import ortho_weight, norm_weight
 import tensorflow as tf
 import numpy 
+import sys
 
 def matmul3d(x3d, matrix):
     shape = tf.shape(x3d)
@@ -284,3 +285,59 @@ class Masked_cross_entropy_loss(object):
         cost *= self.y_mask
         cost = tf.reduce_sum(cost, axis=0, keep_dims=False)
         return cost
+
+class TextCNNLayer(object):
+    def __init__(self,
+                 filter_sizes_and_counts,
+                 filter_width,
+                 activation_fn):
+        self.activation_fn = activation_fn
+        self.filters = []
+        self.num_features = 0
+        num_in_channels = 1
+        for num_words, count in filter_sizes_and_counts:
+            if count <= 0: 
+                print >>sys.stderr, "Filter", num_words, "with zero count -- skipping"
+                continue
+            self.num_features += count
+            num_out_channels = count
+            W_init = numpy.random.randn(
+                            num_words,
+                            filter_width,
+                            num_in_channels,
+                            num_out_channels)
+            W = tf.Variable(W_init, 
+                            dtype=tf.float32,
+                            name='W-{}x{}'.format(num_words, num_out_channels))
+            self.filters.append(W)
+        b_init = numpy.zeros((self.num_features,))
+        self.b = tf.Variable(b_init, dtype=tf.float32, name='b')
+
+    def forward(self, x):
+        conv_outs = []
+        for filter_ in self.filters:
+            out = tf.nn.conv2d(
+                    input=x,
+                    filter=filter_,
+                    strides=[1,1,1,1],
+                    padding='VALID') # out.shape=(batch, seqLen-num_words+1, 1, count)
+            out = tf.squeeze(out, axis=2)
+            out = tf.reduce_max(out, axis=1) # shape (batch, count)
+            conv_outs.append(out)
+        features = tf.concat(conv_outs, axis=1) # shape (batch, num_features)
+        features += self.b
+        features = self.activation_fn(features)
+        return features
+
+def create_samples_mask(samples, padlen=None):
+    lengths = tf.reduce_sum(
+                tf.cast(tf.not_equal(samples, 0), dtype=tf.float32),
+                axis=0)
+    if padlen is None:
+        lengths = tf.where(tf.equal(samples[-1], 0), lengths + 1, lengths) #Add 1 for eos if reached
+    else:
+        print 'Lengths will be at least of size', padlen
+        lengths = tf.where(tf.equal(samples[-1], 0), lengths + 1, lengths) #Add 1 for eos if reached
+        lengths = tf.maximum(lengths, padlen)
+    samples_mask = tf.transpose(tf.sequence_mask(lengths, dtype=tf.float32)) 
+    return samples_mask

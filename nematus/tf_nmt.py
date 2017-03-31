@@ -10,6 +10,7 @@ from threading import Thread
 from Queue import Queue
 from datetime import datetime
 from tf_critic import *
+from tf_cnn_critic import *
 
 def create_model(config, sess):
     print >>sys.stderr, 'Building model...',
@@ -179,9 +180,15 @@ def create_wgan(config):
     generator = Generator(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask)
     print 'Done'
     print 'Critic...',
-    critic = Critic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask, generator=generator)
+    if config.use_cnn_critic:
+        fakes = generator.decoder.sample()
+        fakes_mask = create_samples_mask(fakes, padlen=len(config.filter_counts))
+        critic = CNNCritic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask,
+                           samples=fakes, samples_mask=fakes_mask)
+    else:
+        critic = Critic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask, generator=generator)
     print 'Done'
-    generator._build_prefix_score(config, critic)
+    #generator._build_prefix_score(config, critic)
 
     saver = tf.train.Saver(max_to_keep=None)
     if not config.reload_critic_and_generator:
@@ -228,8 +235,8 @@ def train_wgan(config, sess):
                 eidx += 1
                 print 'Epoch', eidx
                 x_in, y_in = text_iterator.next()
-            x_in, x_mask_in, y_in, y_mask_in = prepare_data(x_in, y_in, maxlen=None)
-            mean_loss, true_scores_mean, fake_scores_mean= critic.run_gradient_step_simple(
+            x_in, x_mask_in, y_in, y_mask_in = prepare_data(x_in, y_in, maxlen=None, padlen=len(config.filter_counts))
+            mean_loss, true_scores_mean, fake_scores_mean= critic.run_gradient_step(
                                                             sess,
                                                             x_in, x_mask_in,
                                                             y_in, y_mask_in)
@@ -559,10 +566,14 @@ def parse_args():
                          help="Number of update steps for generator")
     adversarial.add_argument('--no_generator_reload', action="store_false", dest="reload_generator",
                          help="")
-    adversarial.add_argument('--use_adam', action="store_true", dest="use_adam",
-                         help="")
+    adversarial.add_argument('--use_adam', action="store_true", help="")
+    adversarial.add_argument('--sigmoid_score', action="store_true", dest="sigmoid_score",
+                         help="Scores will be passed through sigmoid and loss will be cross-entropy")
     adversarial.add_argument('--reload_critic_and_generator', type=str, default=None, metavar='PATH',
                          help="load existing critcit and generator from this path")
+    adversarial.add_argument('--filter_counts', type=int, default=None, nargs='+', metavar='INT',
+                         help="list of filter counts: '--filter_counts 250 200 50' for total number of features 500 (default: %(default)s)")
+    adversarial.add_argument('--use_cnn_critic', action="store_true", help="")
     config = parser.parse_args()
     return config
 

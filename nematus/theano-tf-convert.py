@@ -64,6 +64,10 @@ class FakeConfig(object):
         self.use_layer_norm = False
         self.translation_maxlen = 8
         self.nematus_compat = True
+        self.filter_counts = [1,2,0,4]
+        self.sigmoid_score = False
+        self.use_adam = False
+        self.weight_clip = 1.
 
 
 def theano_to_tensorflow_model(in_path, out_path):

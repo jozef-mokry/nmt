@@ -232,7 +232,7 @@ class Critic(StandardModel):
             self.clip_vars = [v.assign(tf.clip_by_value(v, -config.weight_clip, config.weight_clip)) \
                                 for v in critic_vars]
 
-    def run_gradient_step_simple(
+    def run_gradient_step(
             self, sess,
             x_in, x_mask_in,
             true_in, true_mask_in):
