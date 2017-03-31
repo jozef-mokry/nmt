@@ -41,6 +41,8 @@ def load_data(config):
                         sort_by_length=config.sort_by_length,
                         maxibatch_size=config.maxibatch_size,
                         use_qual_weights=config.use_qual_weights,
+                        train_qual_weights=config.train_qual_weights,
+                        n_qual_weights=config.n_qual_weights,
                         keep_data_in_memory=config.keep_train_set_in_memory)
 
     if config.validFreq:
@@ -96,6 +98,7 @@ def train(config, sess):
     t = model.get_global_step()
     loss_per_sentence = model.get_loss()
     mean_loss = model.get_mean_loss()
+    qual_lc, qual_lc_norm = model.get_qual_lc();
 
     if config.summaryFreq:
         writer = tf.summary.FileWriter(config.summary_dir, sess.graph)
@@ -120,7 +123,7 @@ def train(config, sess):
                 continue
             (seqLen, batch_size) = x_in.shape
             inn = {x:x_in, y:y_in, x_mask:x_mask_in, y_mask:y_mask_in, qual_weights:qual_weights_in}
-            out = [t, apply_grads, mean_loss]
+            out = [t, apply_grads, mean_loss, qual_lc, qual_lc_norm]
             if config.summaryFreq and uidx % config.summaryFreq == 0:
                 out += [merged]
             out = sess.run(out, feed_dict=inn)
@@ -133,7 +136,7 @@ def train(config, sess):
             if config.summaryFreq and uidx % config.summaryFreq == 0:
                 writer.add_summary(out[3], out[0])
 
-            if config.dispFreq and uidx % config.dispFreq == 0:
+            if config.dispFreq and uidx % config.dispFreq == 1:
                 duration = time.time() - last_time
                 disp_time = datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')
                 print disp_time, \
@@ -142,6 +145,7 @@ def train(config, sess):
                       'Loss/word:', total_loss/n_words, \
                       'Words/sec:', n_words/duration, \
                       'Sents/sec:', n_sents/duration
+                print out[3]
                 last_time = time.time()
                 total_loss = 0.
                 n_sents = 0
@@ -341,6 +345,10 @@ def parse_args():
                          help="Set to use layer normalization in encoder and decoder")
     training.add_argument('--use_qual_weights', action="store_true", dest="use_qual_weights",
                          help="Use provided data weights when training")
+    training.add_argument('--train_qual_weights', action="store_true", dest="train_qual_weights",
+                         help="Train the linear combination of quality features provided")
+    training.add_argument('--n_qual_weights', type=int, default=1, metavar='INT',
+                         help="Number of quality features")
 
     validation = parser.add_argument_group('validation parameters')
     validation.add_argument('--valid_source_dataset', type=str, default=None, metavar='PATH', 

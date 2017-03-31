@@ -333,6 +333,7 @@ class StandardModel(object):
         #variable dimensions
         seqLen = None
         batch_size = None
+        n_qual_weights = None
 
         self.x = tf.placeholder(
                     dtype=tf.int32,
@@ -352,8 +353,8 @@ class StandardModel(object):
                         shape=(seqLen, batch_size))
         self.qual_weights = tf.placeholder(
                         dtype=tf.float32,
-                        name='train_weights',
-                        shape=(batch_size,))
+                        name='qual_weights',
+                        shape=(batch_size, n_qual_weights))
 
         with tf.name_scope("encoder"):
             self.encoder = Encoder(config)
@@ -363,10 +364,16 @@ class StandardModel(object):
             self.decoder = Decoder(config, ctx, self.x_mask)
             self.logits = self.decoder.score(self.y)
 
+        with tf.name_scope("qual_weights"):
+            #self.qual_lc = [[1.0],[2.1]];
+            self.qual_lc = tf.Variable(numpy.random.rand(config.n_qual_weights,1).astype('float32'), name='lambda');
+            self.qual_lc_norm = tf.nn.softmax(self.qual_lc, dim=0)
+            self.combined_qual_weights =  tf.matmul(self.qual_weights, self.qual_lc_norm)
+
         with tf.name_scope("loss"):
             self.loss_layer = Masked_cross_entropy_loss(self.y, self.y_mask)
             self.loss_per_sentence = self.loss_layer.forward(self.logits)
-            self.weighted_loss_per_sentence =  self.loss_per_sentence * self.qual_weights
+            self.weighted_loss_per_sentence =  self.loss_per_sentence * self.combined_qual_weights
             self.mean_loss = tf.reduce_mean(self.weighted_loss_per_sentence, keep_dims=False)
 
         #with tf.name_scope("optimizer"):
@@ -396,6 +403,9 @@ class StandardModel(object):
 
     def get_apply_grads(self):
         return self.apply_grads
+
+    def get_qual_lc(self):
+        return self.qual_lc, self.qual_lc_norm
 
     def _get_samples(self):
         if self.sampled_ys == None:

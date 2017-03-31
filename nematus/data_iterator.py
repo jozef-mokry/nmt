@@ -49,6 +49,8 @@ class TextIterator:
                  sort_by_length=True,
                  maxibatch_size=20,
                  use_qual_weights=False,
+                 train_qual_weights=False,
+                 n_qual_weights=1,
                  keep_data_in_memory=False):
         if keep_data_in_memory:
             self.source, self.target = FileWrapper(source), FileWrapper(target)
@@ -93,7 +95,11 @@ class TextIterator:
         self.source_buffer = []
         self.target_buffer = []
         self.weight_buffer = []
+
         self.use_qual_weights = use_qual_weights
+        self.train_qual_weights = train_qual_weights
+        self.n_qual_weights = n_qual_weights
+
         self.k = batch_size * maxibatch_size
         
 
@@ -138,7 +144,11 @@ class TextIterator:
                     ww_t, tt = tt.split(" ||| ", 1)
                     assert ww_s == ww_t, 'Weights in source and target file do not agree!'
 
-                    ww = ww_s
+                    if self.train_qual_weights:
+                        ww = ww_s.split() # the features are there split by spaces
+                        assert len(ww) == self.n_qual_weights, "Number of quality weights does not agree"
+                    else:
+                        ww = ww_s
 
                 ss = ss.split()
                 tt = tt.split()
@@ -210,7 +220,10 @@ class TextIterator:
 
                 if self.use_qual_weights:
                     # read from the weight buffer
-                    ww = float(self.weight_buffer.pop())
+                    if self.train_qual_weights:
+                        ww = [float(x) for x in self.weight_buffer.pop()]
+                    else:
+                        ww = float(self.weight_buffer.pop())
                     weights.append(ww)
 
                 if len(source) >= self.batch_size or \
