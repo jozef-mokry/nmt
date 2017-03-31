@@ -207,6 +207,7 @@ def create_wgan(config):
         print >>sys.stderr, "Reloading critic and generator from: ", config.reload_critic_and_generator,
         saver.restore(sess, os.path.abspath(config.reload_critic_and_generator))
     print >>sys.stderr, 'Done'
+    tf.get_default_graph().finalize()
 
     return generator, critic, saver
 
