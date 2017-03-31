@@ -6,7 +6,49 @@ import sys
 import json
 import cPickle as pkl
 import numpy
+import data_iterator as di
 
+def load_data(config):
+    print >>sys.stderr, 'Reading data...',
+    text_iterator = di.TextIterator(
+                        source=config.source_dataset,
+                        target=config.target_dataset,
+                        source_dicts=[config.source_vocab],
+                        target_dict=config.target_vocab,
+                        batch_size=config.batch_size,
+                        maxlen=config.maxlen,
+                        n_words_source=config.source_vocab_size,
+                        n_words_target=config.target_vocab_size,
+                        skip_empty=True,
+                        shuffle_each_epoch=config.shuffle_each_epoch,
+                        sort_by_length=config.sort_by_length,
+                        maxibatch_size=config.maxibatch_size,
+                        keep_data_in_memory=config.keep_train_set_in_memory)
+
+    if config.validFreq:
+        valid_text_iterator = di.TextIterator(
+                                source=config.valid_source_dataset,
+                                target=config.valid_target_dataset,
+                                source_dicts=[config.source_vocab],
+                                target_dict=config.target_vocab,
+                                batch_size=config.valid_batch_size,
+                                maxlen=config.validation_maxlen,
+                                n_words_source=config.source_vocab_size,
+                                n_words_target=config.target_vocab_size,
+                                shuffle_each_epoch=False,
+                                sort_by_length=True,
+                                maxibatch_size=config.maxibatch_size)
+    else:
+        valid_text_iterator = None
+    print >>sys.stderr, 'Done'
+    return text_iterator, valid_text_iterator
+
+def load_dictionaries(config):
+    source_to_num = load_dict(config.source_vocab)
+    target_to_num = load_dict(config.target_vocab)
+    num_to_source = reverse_dict(source_to_num)
+    num_to_target = reverse_dict(target_to_num)
+    return source_to_num, target_to_num, num_to_source, num_to_target
 
 # batch preparation
 def prepare_data(seqs_x, seqs_y, maxlen=None):
