@@ -329,15 +329,27 @@ class TextCNNLayer(object):
         features = self.activation_fn(features)
         return features
 
-def create_samples_mask(samples, padlen=None):
+def create_samples_mask(samples, pad_to_len=None):
     lengths = tf.reduce_sum(
                 tf.cast(tf.not_equal(samples, 0), dtype=tf.float32),
                 axis=0)
-    if padlen is None:
+    if pad_to_len is None:
         lengths = tf.where(tf.equal(samples[-1], 0), lengths + 1, lengths) #Add 1 for eos if reached
+        samples_mask = tf.transpose(tf.sequence_mask(lengths, dtype=tf.float32)) 
     else:
-        print 'Lengths will be at least of size', padlen
+        print 'Lengths will be at least of size', pad_to_len
         lengths = tf.where(tf.equal(samples[-1], 0), lengths + 1, lengths) #Add 1 for eos if reached
-        lengths = tf.maximum(lengths, padlen)
-    samples_mask = tf.transpose(tf.sequence_mask(lengths, dtype=tf.float32)) 
+        maxlen = tf.maximum(tf.reduce_max(lengths), pad_to_len)
+        samples_mask = tf.transpose(tf.sequence_mask(lengths, dtype=tf.float32, maxlen=maxlen)) 
     return samples_mask
+
+def pad_to_at_least_len(x, pad_to_len):
+    seqLen = tf.shape(x)[0]
+
+    x_pad = tf.cond(seqLen < pad_to_len,
+                    lambda: tf.pad(x, [[0, pad_to_len-seqLen],[0,0]]),
+                    lambda: x)
+    return x_pad
+
+    
+

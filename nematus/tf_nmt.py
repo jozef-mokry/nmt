@@ -182,7 +182,8 @@ def create_wgan(config):
     print 'Critic...',
     if config.use_cnn_critic:
         fakes = generator.decoder.sample()
-        fakes_mask = create_samples_mask(fakes, padlen=len(config.filter_counts))
+        fakes_mask = create_samples_mask(fakes, pad_to_len=len(config.filter_counts))
+        fakes = pad_to_at_least_len(fakes, pad_to_len=len(config.filter_counts))
         critic = CNNCritic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask,
                            samples=fakes, samples_mask=fakes_mask)
     else:
@@ -236,7 +237,7 @@ def train_wgan(config, sess):
                 eidx += 1
                 print 'Epoch', eidx
                 x_in, y_in = text_iterator.next()
-            x_in, x_mask_in, y_in, y_mask_in = prepare_data(x_in, y_in, maxlen=None, padlen=len(config.filter_counts))
+            x_in, x_mask_in, y_in, y_mask_in = prepare_data(x_in, y_in, maxlen=None, pad_to_len=len(config.filter_counts))
             mean_loss, true_scores_mean, fake_scores_mean= critic.run_gradient_step(
                                                             sess,
                                                             x_in, x_mask_in,
