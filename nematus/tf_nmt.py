@@ -292,11 +292,16 @@ def wgan_validate(config, sess, generator, critic, text_iterator):
     sent_true, sent_fake = [], []
     total_seen = 0
     for xx, yy in text_iterator:
-        x_in, x_mask_in, y_in, y_mask_in = prepare_data(xx, yy, maxlen=None)
-        samples, samples_mask = generator.generate_fakes(sess, x_in, x_mask_in)
-        true_scores = critic.get_score_per_sentence(sess, x_in, x_mask_in, y_in, y_mask_in)
-        fake_scores = critic.get_score_per_sentence(sess, x_in, x_mask_in, samples, samples_mask)
-        assert x_in.shape[1] == y_in.shape[1] == samples.shape[1] == samples_mask.shape[1]
+        x_in, x_mask_in, y_in, y_mask_in = prepare_data(xx, yy, maxlen=None, pad_to_len=len(config.filter_counts))
+        inn = {critic.get_x(): x_in,
+               critic.get_y(): y_in,
+               critic.get_x_mask(): x_mask_in,
+               critic.get_y_mask(): y_mask_in}
+        out =[critic.get_samples(),
+              critic.get_true_scores(),
+              critic.get_fake_scores()]
+        samples, true_scores, fake_scores = sess.run(out, inn)
+        assert x_in.shape[1] == y_in.shape[1] == samples.shape[1]
         assert true_scores.shape == fake_scores.shape == (x_in.shape[1],)
         all_true += list(true_scores)
         all_fake += list(fake_scores)
