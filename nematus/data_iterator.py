@@ -235,4 +235,4 @@ class TextIterator:
         if self.use_qual_weights:
             return source, target, weights
         else:
-            return source, target, [1]*len(source)
+            return source, target, [[1]]*len(source)

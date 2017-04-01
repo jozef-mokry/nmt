@@ -134,7 +134,7 @@ def train(config, sess):
             uidx += 1
 
             if config.summaryFreq and uidx % config.summaryFreq == 0:
-                writer.add_summary(out[3], out[0])
+                writer.add_summary(out[-1], out[0])
 
             if config.dispFreq and uidx % config.dispFreq == 1:
                 duration = time.time() - last_time
@@ -146,6 +146,7 @@ def train(config, sess):
                       'Words/sec:', n_words/duration, \
                       'Sents/sec:', n_sents/duration
                 print out[3]
+                print out[4]
                 last_time = time.time()
                 total_loss = 0.
                 n_sents = 0
