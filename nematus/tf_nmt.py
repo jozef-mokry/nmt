@@ -182,8 +182,8 @@ def create_wgan(config):
     print 'Critic...',
     if config.use_cnn_critic:
         fakes = generator.decoder.sample()
-        fakes_mask = create_samples_mask(fakes, pad_to_len=len(config.filter_counts))
-        fakes = pad_to_at_least_len(fakes, pad_to_len=len(config.filter_counts))
+        fakes_mask = create_samples_mask(fakes, pad_to_len=max(config.filter_sizes))
+        fakes = pad_to_at_least_len(fakes, pad_to_len=max(config.filter_sizes))
         critic = CNNCritic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask,
                            samples=fakes, samples_mask=fakes_mask)
     else:
@@ -237,7 +237,8 @@ def train_wgan(config, sess):
                 eidx += 1
                 print 'Epoch', eidx
                 x_in, y_in = text_iterator.next()
-            x_in, x_mask_in, y_in, y_mask_in = prepare_data(x_in, y_in, maxlen=None, pad_to_len=len(config.filter_counts))
+            x_in, x_mask_in, y_in, y_mask_in = prepare_data(x_in, y_in, maxlen=None, pad_to_len=max(config.filter_sizes))
+            #print 'debug:', x_in.shape, y_in.shape
             mean_loss, true_scores_mean, fake_scores_mean= critic.run_gradient_step(
                                                             sess,
                                                             x_in, x_mask_in,
@@ -292,7 +293,7 @@ def wgan_validate(config, sess, generator, critic, text_iterator):
     sent_true, sent_fake = [], []
     total_seen = 0
     for xx, yy in text_iterator:
-        x_in, x_mask_in, y_in, y_mask_in = prepare_data(xx, yy, maxlen=None, pad_to_len=len(config.filter_counts))
+        x_in, x_mask_in, y_in, y_mask_in = prepare_data(xx, yy, maxlen=None, pad_to_len=max(config.filter_sizes))
         inn = {critic.get_x(): x_in,
                critic.get_y(): y_in,
                critic.get_x_mask(): x_mask_in,
@@ -303,9 +304,10 @@ def wgan_validate(config, sess, generator, critic, text_iterator):
         samples, true_scores, fake_scores = sess.run(out, inn)
         assert x_in.shape[1] == y_in.shape[1] == samples.shape[1]
         assert true_scores.shape == fake_scores.shape == (x_in.shape[1],)
+        assert len(xx) == len(list(y_in.T))
         all_true += list(true_scores)
         all_fake += list(fake_scores)
-        sent_true += list(y_in.T)
+        sent_true += zip(list(y_in.T), xx)
         sent_fake += list(samples.T)
         total_seen += len(xx)
         print 'Seen {}'.format(total_seen)
@@ -350,12 +352,13 @@ def wgan_validate_helper(config, sess):
                                                 generator,
                                                 critic,
                                                 valid_text_iterator)
-    assert len(all_true) == len(sent_true)
-    assert len(all_fake) == len(sent_fake)
+    assert len(all_true) == len(sent_true), "{} {}".format(len(all_true), len(sent_true))
+    assert len(all_fake) == len(sent_fake), "{} {}".format(len(all_fake), len(sent_fake))
     source_to_num, target_to_num, num_to_source, num_to_target = load_dictionaries(config)
     print 'True sentences'
-    for score, sent in zip(all_true, sent_true):
-        print "{:<20} : {}".format(score, seqs2words(sent, num_to_target))
+    for score, (sent, x) in zip(all_true, sent_true):
+        x = [factors[0] for factors in x]
+        print "{:<20} : {} --- {}".format(score, seqs2words(sent, num_to_target), seqs2words(x, num_to_source))
     print 'Fake sentences'
     for score, sent in zip(all_fake, sent_fake):
         print "{:<20} : {}".format(score, seqs2words(sent, num_to_target))
@@ -580,6 +583,8 @@ def parse_args():
                          help="load existing critcit and generator from this path")
     adversarial.add_argument('--filter_counts', type=int, default=None, nargs='+', metavar='INT',
                          help="list of filter counts: '--filter_counts 250 200 50' for total number of features 500 (default: %(default)s)")
+    adversarial.add_argument('--filter_sizes', type=int, default=None, nargs='+', metavar='INT',
+                         help="list of filter sizes")
     adversarial.add_argument('--use_cnn_critic', action="store_true", help="")
     config = parser.parse_args()
     return config
