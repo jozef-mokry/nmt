@@ -314,10 +314,16 @@ def wgan_validate(config, sess, generator, critic, text_iterator):
     assert total_seen == len(all_true)
     all_true = numpy.array(all_true)
     all_fake = numpy.array(all_fake)
-    accuracy = (all_true > all_fake).mean()
-    pos_true = (all_true > 0).mean()
-    neg_fake = (all_fake < 0).mean()
-    total_loss = (-all_true + all_fake).sum()
+    if config.sigmoid_score:
+        pos_true = (all_true > 0.5).mean()
+        neg_fake = (all_fake < 0.5).mean()
+        accuracy = (pos_true+neg_fake)/2.
+        total_loss = (numpy.log(all_true) - numpy.log(all_fake)).sum()
+    else:
+        accuracy = (all_true > all_fake).mean()
+        pos_true = (all_true > 0).mean()
+        neg_fake = (all_fake < 0).mean()
+        total_loss = (-all_true + all_fake).sum()
     print 'Validation loss (AVG/SUM/N_SENT/ACC/POS_TRUE/NEG_FAKE):', total_loss/total_seen, total_loss, total_seen, accuracy, pos_true, neg_fake
     print 'True: mean/std/min/max {}/{}/{}/{}'.format(
                                                 all_true.mean(),
