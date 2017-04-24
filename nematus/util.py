@@ -100,7 +100,7 @@ def load_dictionaries(config):
     return source_to_num, target_to_num, num_to_source, num_to_target
 
 # batch preparation
-def prepare_data(seqs_x, seqs_y, maxlen=None, pad_to_len=0):
+def prepare_data(seqs_x, seqs_y, maxlen=None):
     # x: a list of sentences
     lengths_x = [len(s) for s in seqs_x]
     lengths_y = [len(s) for s in seqs_y]
@@ -127,8 +127,8 @@ def prepare_data(seqs_x, seqs_y, maxlen=None, pad_to_len=0):
     n_samples = len(seqs_x)
     n_factors = len(seqs_x[0][0])
     assert n_factors == 1
-    maxlen_x = max(numpy.max(lengths_x) + 1, pad_to_len)
-    maxlen_y = max(numpy.max(lengths_y) + 1, pad_to_len)
+    maxlen_x = numpy.max(lengths_x) + 1 
+    maxlen_y = numpy.max(lengths_y) + 1
 
     x = numpy.zeros((n_factors, maxlen_x, n_samples)).astype('int64')
     y = numpy.zeros((maxlen_y, n_samples)).astype('int64')

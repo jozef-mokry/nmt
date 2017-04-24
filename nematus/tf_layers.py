@@ -289,14 +289,17 @@ class Masked_cross_entropy_loss(object):
 
 class TextCNNLayer(object):
     def __init__(self,
-                 filter_sizes_and_counts,
+                 filter_sizes,
+                 filter_counts,
                  filter_width,
                  activation_fn):
+        assert len(filter_sizes) == len(filter_counts), (len(filter_sizes), len(filter_counts))
         self.activation_fn = activation_fn
         self.filters = []
         self.num_features = 0
+        self.max_filter_size = max(filter_sizes)
         num_in_channels = 1
-        for num_words, count in filter_sizes_and_counts:
+        for num_words, count in zip(filter_sizes, filter_counts):
             if count <= 0: 
                 logging.warn("Filter {} with zero count -- skipping".format(num_words))
                 continue
@@ -314,15 +317,25 @@ class TextCNNLayer(object):
         b_init = numpy.zeros((self.num_features,))
         self.b = tf.Variable(b_init, dtype=tf.float32, name='b')
 
-    def forward(self, x):
+    def forward(self, x, x_maskT):
         conv_outs = []
+        x_maskT = tf.expand_dims(x_maskT, axis=2) # (batch, seqLen, 1)
+
+        # pad so that each filter can cover full sentence
+        x_maskT = tf.pad(x_maskT, [[0,0], [0, self.max_filter_size], [0,0]])
+        x = tf.pad(x, [[0,0], [0, self.max_filter_size], [0,0], [0,0]])
+
         for filter_ in self.filters:
             out = tf.nn.conv2d(
                     input=x,
                     filter=filter_,
                     strides=[1,1,1,1],
                     padding='VALID') # out.shape=(batch, seqLen-num_words+1, 1, count)
-            out = tf.squeeze(out, axis=2)
+
+            out = tf.squeeze(out, axis=2) # (batch, seqLen-num_words+1, count)
+            out = tf.pad(out, [[0, 0],[0,tf.shape(filter_)[0]-1], [0,0]]) # (batch, seqLen, count)
+            #out *= x_maskT # all garbage values are zero already
+            out += (1-x_maskT)*tf.reduce_min(out, axis=1, keep_dims=True)
             out = tf.reduce_max(out, axis=1) # shape (batch, count)
             conv_outs.append(out)
         features = tf.concat(conv_outs, axis=1) # shape (batch, num_features)
@@ -330,27 +343,11 @@ class TextCNNLayer(object):
         features = self.activation_fn(features)
         return features
 
-def create_samples_mask(samples, pad_to_len=None):
+def create_samples_mask(samples):
     lengths = tf.reduce_sum(
                 tf.cast(tf.not_equal(samples, 0), dtype=tf.float32),
                 axis=0)
-    if pad_to_len is None:
-        lengths = tf.where(tf.equal(samples[-1], 0), lengths + 1, lengths) #Add 1 for eos if reached
-        samples_mask = tf.transpose(tf.sequence_mask(lengths, dtype=tf.float32)) 
-    else:
-        print 'Lengths will be at least of size', pad_to_len
-        lengths = tf.where(tf.equal(samples[-1], 0), lengths + 1, lengths) #Add 1 for eos if reached
-        maxlen = tf.maximum(tf.reduce_max(lengths), pad_to_len)
-        samples_mask = tf.transpose(tf.sequence_mask(lengths, dtype=tf.float32, maxlen=maxlen)) 
+    lengths = tf.where(tf.equal(samples[-1], 0), lengths + 1, lengths) #Add 1 for eos if reached
+    samples_mask = tf.transpose(tf.sequence_mask(lengths, dtype=tf.float32)) 
     return samples_mask
-
-def pad_to_at_least_len(x, pad_to_len):
-    seqLen = tf.shape(x)[0]
-
-    x_pad = tf.cond(seqLen < pad_to_len,
-                    lambda: tf.pad(x, [[0, pad_to_len-seqLen],[0,0]]),
-                    lambda: x)
-    return x_pad
-
-    
 

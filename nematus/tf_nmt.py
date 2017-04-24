@@ -181,8 +181,7 @@ def create_wgan(config):
     logging.info('Critic...')
     if config.use_cnn_critic:
         fakes = generator.decoder.sample()
-        fakes_mask = create_samples_mask(fakes, pad_to_len=max(config.filter_sizes))
-        fakes = pad_to_at_least_len(fakes, pad_to_len=max(config.filter_sizes))
+        fakes_mask = create_samples_mask(fakes)
         critic = CNNCritic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask,
                            samples=fakes, samples_mask=fakes_mask)
     else:
@@ -287,7 +286,7 @@ def wgan_validate(config, sess, generator, critic, text_iterator):
     sent_true, sent_fake = [], []
     total_seen = 0
     for xx, yy in text_iterator:
-        x_in, x_mask_in, y_in, y_mask_in = prepare_data(xx, yy, maxlen=None, pad_to_len=max(config.filter_sizes))
+        x_in, x_mask_in, y_in, y_mask_in = prepare_data(xx, yy, maxlen=None)
         inn = {critic.get_x(): x_in,
                critic.get_y(): y_in,
                critic.get_x_mask(): x_mask_in,
@@ -344,7 +343,7 @@ def wgan_validate_helper(config, sess):
                         n_words_source=config.source_vocab_size,
                         n_words_target=config.target_vocab_size,
                         shuffle_each_epoch=False,
-                        sort_by_length=False, #TODO
+                        sort_by_length=True, #TODO
                         maxibatch_size=config.maxibatch_size)
 
     all_true, all_fake, sent_true, sent_fake = wgan_validate(
