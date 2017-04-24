@@ -7,6 +7,14 @@ import json
 import cPickle as pkl
 import numpy
 import data_iterator as di
+import os
+
+def create_save_dir(config):
+    path = os.path.dirname(os.path.abspath(config.saveto))
+    print >>sys.stderr, 'Creating folder', path, '...',
+    os.mkdir(path)
+    print >>sys.stderr, 'Done'
+
 
 def load_data(config):
     print >>sys.stderr, 'Reading data...',

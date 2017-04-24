@@ -605,10 +605,12 @@ if __name__ == "__main__":
             if config.run_validation:
                 wgan_validate_helper(config, sess)
             else:
+                create_save_dir(config)
                 train_wgan(config, sess)
         elif config.translate_valid:
             translate(config, sess)
         elif config.run_validation:
             validate_helper(config, sess)
         else:
+            create_save_dir(config)
             train(config, sess)
