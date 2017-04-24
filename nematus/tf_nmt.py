@@ -11,9 +11,10 @@ from Queue import Queue
 from datetime import datetime
 from tf_critic import *
 from tf_cnn_critic import *
+import logging
 
 def create_model(config, sess):
-    print >>sys.stderr, 'Building model...',
+    logging.info('Building model...')
     model = StandardModel(config)
 
     # initialize model
@@ -23,7 +24,7 @@ def create_model(config, sess):
         sess.run(init_op)
     else:
         saver.restore(sess, os.path.abspath(config.reload))
-    print >>sys.stderr, 'Done'
+    logging.info('Done')
 
     return model, saver 
 
@@ -59,7 +60,7 @@ def train(config, sess):
 
     if config.summaryFreq:
         writer = tf.summary.FileWriter(config.summary_dir, sess.graph)
-    tf.summary.scalar(name='mean cost', tensor=mean_loss)
+    tf.summary.scalar(name='mean_cost', tensor=mean_loss)
     tf.summary.scalar(name='t', tensor=t)
     merged = tf.summary.merge_all()
 
@@ -69,14 +70,14 @@ def train(config, sess):
     n_sents, n_words = 0, 0
     last_time = time.time()
     uidx = sess.run(t)
-    print >>sys.stderr, "Initial uidx={}".format(uidx)
+    logging.info("Initial uidx={}".format(uidx))
     STOP = False
     for eidx in xrange(config.max_epochs):
-        print 'Starting epoch', eidx
+        logging.info('Starting epoch {}'.format(eidx))
         for source_sents, target_sents in text_iterator:
             x_in, x_mask_in, y_in, y_mask_in = prepare_data(source_sents, target_sents, maxlen=None)
             if x_in is None:
-                print >>sys.stderr, 'Minibatch with zero sample under length ', config.maxlen
+                logging.warn('Minibatch with zero sample under length {}'.format(config.maxlen))
                 continue
             (seqLen, batch_size) = x_in.shape
             inn = {x:x_in, y:y_in, x_mask:x_mask_in, y_mask:y_mask_in}
@@ -95,13 +96,9 @@ def train(config, sess):
 
             if config.dispFreq and uidx % config.dispFreq == 0:
                 duration = time.time() - last_time
-                disp_time = datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')
-                print disp_time, \
-                      'Epoch:', eidx, \
-                      'Update:', uidx, \
-                      'Loss/word:', total_loss/n_words, \
-                      'Words/sec:', n_words/duration, \
-                      'Sents/sec:', n_sents/duration
+                msg = 'Epoch: {} Update: {} Loss/word: {} Words/sec: {} Sents/sec: {}'
+                logging.info(msg.format(eidx, uidx, total_loss/n_words,
+                                        n_words/duration, n_sents/duration))
                 last_time = time.time()
                 total_loss = 0.
                 n_sents = 0
@@ -115,9 +112,9 @@ def train(config, sess):
                 samples = model.sample(sess, x_small, x_mask_small)
                 assert len(samples) == len(x_small.T) == len(y_small.T), (len(samples), x_small.shape, y_small.shape)
                 for xx, yy, ss in zip(x_small.T, y_small.T, samples):
-                    print >>sys.stderr, 'SOURCE:', seqs2words(xx, num_to_source)
-                    print >>sys.stderr, 'TARGET:', seqs2words(yy, num_to_target)
-                    print >>sys.stderr, 'SAMPLE:', seqs2words(ss, num_to_target)
+                    logging.info('SOURCE: {}'.format(seqs2words(xx, num_to_source)))
+                    logging.info('TARGET: {}'.format(seqs2words(yy, num_to_target)))
+                    logging.info('SAMPLE: {}'.format(seqs2words(ss, num_to_target)))
 
             if config.beamFreq and uidx % config.beamFreq == 0:
                 x_small, x_mask_small, y_small = x_in[:, :10], x_mask_in[:, :10], y_in[:,:10]
@@ -125,16 +122,18 @@ def train(config, sess):
                 # samples is a list with shape batch x beam x len
                 assert len(samples) == len(x_small.T) == len(y_small.T), (len(samples), x_small.shape, y_small.shape)
                 for xx, yy, ss in zip(x_small.T, y_small.T, samples):
-                    print >>sys.stderr, 'SOURCE:', seqs2words(xx, num_to_source)
-                    print >>sys.stderr, 'TARGET:', seqs2words(yy, num_to_target)
+                    logging.info('SOURCE: {}'.format(seqs2words(xx, num_to_source)))
+                    logging.info('TARGET: {}'.format(seqs2words(yy, num_to_target)))
                     for i, (sample, cost) in enumerate(ss):
-                        print >>sys.stderr, 'SAMPLE', i, ':', seqs2words(sample, num_to_target), 'Cost/Len/Avg:', cost, '/', len(sample), '/', cost/len(sample)
+                        msg = 'SAMPLE {}: {}  Cost/Len/Avg: {}/{}/{}'
+                        logging.info(msg.format(i, seqs2words(sample, num_to_target), 
+                                                cost, len(sample), cost/len(sample)))
 
             if config.validFreq and uidx % config.validFreq == 0:
                 validate(sess, valid_text_iterator, model)
 
             if config.finish_after and uidx % config.finish_after == 0:
-                print >>sys.stderr, "Maximum number of updates reached"
+                logging.info("Maximum number of updates reached")
                 STOP=True
                 break
         if STOP:
@@ -149,7 +148,7 @@ def reload_generator(sess, config):
         if v.name.startswith('Generator/'):
             old_name = v.name[len('Generator/'):].rsplit(':', 1)[0]
             name_mapping[old_name] = v
-            print '{} -> {}'.format(v.name, old_name)
+            logging.debug('{} -> {}'.format(v.name, old_name))
         else:
             assert False, v.name
     gen_saver = tf.train.Saver(var_list=name_mapping)
@@ -161,25 +160,25 @@ def scale_critics_params(sess, config):
                         scope="Critic")
     ops = []
     for v in critic_vars:
-        print 'Clipping', v.name,
+        logging.debug('Clipping {}'.format(v.name))
         v_abs = tf.abs(v)
         v_max = tf.reduce_max(v_abs, axis=0, keep_dims=True)
         v_max = tf.where(tf.equal(v_max, 0.), v_max + 1, v_max)
         v_new = v / v_max
         v_new *= 0.5*config.weight_clip
         sess.run(tf.assign(v, v_new))
-        print 'Done'
-    print 'Running ops'
+        logging.debug('Done')
+    logging.info('Running ops')
 
 def create_wgan(config):
     x = tf.placeholder(tf.int32, shape=(None,None))
     x_mask = tf.placeholder(tf.float32, shape=(None,None))
     y = tf.placeholder(tf.int32, shape=(None,None))
     y_mask = tf.placeholder(tf.float32, shape=(None,None))
-    print 'Generator...',
+    logging.info('Generator...')
     generator = Generator(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask)
-    print 'Done'
-    print 'Critic...',
+    logging.info('Done')
+    logging.info('Critic...')
     if config.use_cnn_critic:
         fakes = generator.decoder.sample()
         fakes_mask = create_samples_mask(fakes, pad_to_len=max(config.filter_sizes))
@@ -188,32 +187,32 @@ def create_wgan(config):
                            samples=fakes, samples_mask=fakes_mask)
     else:
         critic = Critic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask, generator=generator)
-    print 'Done'
+    logging.info('Done')
     #generator._build_prefix_score(config, critic)
 
     saver = tf.train.Saver(max_to_keep=None)
     if not config.reload_critic_and_generator:
         init_op = tf.global_variables_initializer()
-        print >>sys.stderr, "Initializing params...",
+        logging.info("Initializing params...")
         sess.run(init_op)
-        print >>sys.stderr, 'Done'
-        print >>sys.stderr, 'Clipping critic...',
+        logging.info('Done')
+        logging.info('Clipping critic...')
         scale_critics_params(sess, config)
-        print >>sys.stderr, 'Done'
+        logging.info('Done')
         if config.reload_generator:
-            print >>sys.stderr, 'Reloading generator...',
+            logging.info('Reloading generator...')
             reload_generator(sess, config)
-            print >>sys.stderr, 'Done'
+            logging.info('Done')
     else:
-        print >>sys.stderr, "Reloading critic and generator from: ", config.reload_critic_and_generator,
+        logging.info("Reloading critic and generator from: {}".format(config.reload_critic_and_generator))
         saver.restore(sess, os.path.abspath(config.reload_critic_and_generator))
-    print >>sys.stderr, 'Done'
+    logging.info('Done')
     tf.get_default_graph().finalize()
 
     return generator, critic, saver
 
 def train_wgan(config, sess):
-    print "Train WGAN"
+    logging.info("Train WGAN")
     generator, critic, saver = create_wgan(config)
     text_iterator, valid_text_iterator = load_data(config)
     gen_text_iterator, _ = load_data(config)
@@ -226,19 +225,18 @@ def train_wgan(config, sess):
     n_words = 0
     n_sents = 0
     uidx = sess.run(critic.t)
-    print 'uidx is', uidx
+    logging.info('uidx is {}'.format(uidx))
     eidx = 0
-    print 'Epoch', eidx
+    logging.info('Epoch {}'.format(eidx))
     while eidx < config.max_epochs:
         for d_step in range(config.d_steps):
             try:
                 x_in, y_in = text_iterator.next()
             except StopIteration:
                 eidx += 1
-                print 'Epoch', eidx
+                logging.info('Epoch {}'.format(eidx))
                 x_in, y_in = text_iterator.next()
-            x_in, x_mask_in, y_in, y_mask_in = prepare_data(x_in, y_in, maxlen=None, pad_to_len=max(config.filter_sizes))
-            #print 'debug:', x_in.shape, y_in.shape
+            x_in, x_mask_in, y_in, y_mask_in = prepare_data(x_in, y_in, maxlen=None)
             mean_loss, true_scores_mean, fake_scores_mean= critic.run_gradient_step(
                                                             sess,
                                                             x_in, x_mask_in,
@@ -254,15 +252,11 @@ def train_wgan(config, sess):
             n_sents += y_in.shape[1]
             if config.dispFreq and uidx % config.dispFreq == 0:
                 duration = time.time() - last_time
-                disp_time = datetime.now().strftime('[%Y-%m-%d %H:%M:%S]')
-                print disp_time, \
-                      'Epoch:', eidx, \
-                      'Update:', uidx, \
-                      'Loss/sent:', total_loss/n_sents, \
-                      'true_score/sent:', true_scores/n_sents, \
-                      'fake_score/sent:', fake_scores/n_sents, \
-                      'Words/sec:', n_words/duration, \
-                      'True Sents/sec:', n_sents/duration
+                msg = 'Epoch: {} Update: {} Loss/sent: {} true_score/sent: {} fake_score/sent: {} Words/sec: {} True Sents/sec: {}'
+                logging.info(msg.format(
+                                eidx, uidx, total_loss/n_sents,
+                                true_scores/n_sents, fake_scores/n_sents,
+                                n_words/duration, n_sents/duration))
                 last_time = time.time()
                 total_loss = 0.
                 true_scores = 0.
@@ -270,14 +264,14 @@ def train_wgan(config, sess):
                 n_sents = 0
                 n_words = 0
             if config.saveFreq and uidx % config.saveFreq == 0:
-                print >>sys.stderr, "Saving model...",
+                logging.info("Saving model...")
                 saver.save(sess, save_path=config.saveto, global_step=uidx)
-                print 'Done'
+                logging.info('Done')
             if config.validFreq and uidx % config.validFreq == 0:
                 wgan_validate(config, sess, generator, critic, valid_text_iterator)
 
         for g_step in range(config.g_steps):
-            print 'g_step', g_step
+            logging.info('g_step {}'.format(g_step))
             try:
                 x_in, _ = gen_text_iterator.next()
             except StopIteration:
@@ -310,7 +304,7 @@ def wgan_validate(config, sess, generator, critic, text_iterator):
         sent_true += zip(list(y_in.T), xx)
         sent_fake += list(samples.T)
         total_seen += len(xx)
-        print 'Seen {}'.format(total_seen)
+        logging.info('Seen {}'.format(total_seen))
     assert total_seen == len(all_true)
     all_true = numpy.array(all_true)
     all_fake = numpy.array(all_fake)
@@ -324,17 +318,18 @@ def wgan_validate(config, sess, generator, critic, text_iterator):
         pos_true = (all_true > 0).mean()
         neg_fake = (all_fake < 0).mean()
         total_loss = (-all_true + all_fake).sum()
-    print 'Validation loss (AVG/SUM/N_SENT/ACC/POS_TRUE/NEG_FAKE):', total_loss/total_seen, total_loss, total_seen, accuracy, pos_true, neg_fake
-    print 'True: mean/std/min/max {}/{}/{}/{}'.format(
+    msg = 'Validation loss (AVG/SUM/N_SENT/ACC/POS_TRUE/NEG_FAKE): {} {} {} {} {} {}'
+    logging.info(msg.format(total_loss/total_seen, total_loss, total_seen, accuracy, pos_true, neg_fake))
+    logging.info('True: mean/std/min/max {}/{}/{}/{}'.format(
                                                 all_true.mean(),
                                                 all_true.std(),
                                                 all_true.min(),
-                                                all_true.max())
-    print 'Fake: mean/std/min/max {}/{}/{}/{}'.format(
+                                                all_true.max()))
+    logging.info('Fake: mean/std/min/max {}/{}/{}/{}'.format(
                                                 all_fake.mean(),
                                                 all_fake.std(),
                                                 all_fake.min(),
-                                                all_fake.max())
+                                                all_fake.max()))
     return all_true, all_fake, sent_true, sent_fake
 
 def wgan_validate_helper(config, sess):
@@ -375,7 +370,7 @@ def translate(config, sess):
     model, saver = create_model(config, sess)
     start_time = time.time()
     _, _, _, num_to_target = load_dictionaries(config)
-    print >>sys.stderr, "NOTE: Length of translations is capped to {}".format(config.translation_maxlen)
+    logging.info("NOTE: Length of translations is capped to {}".format(config.translation_maxlen))
 
     n_sent = 0
     batches, idxs = read_all_lines(config, config.valid_source_dataset)
@@ -411,7 +406,7 @@ def translate(config, sess):
         i, samples = out_queue.get()
         outputs[i] = list(samples)
         n_sent += len(samples)
-        print >>sys.stderr, 'Translated {} sents'.format(n_sent)
+        logging.info('Translated {} sents'.format(n_sent))
     for _ in range(config.n_threads):
         in_queue.put(None)
     outputs = [beam for batch in outputs for beam in batch]
@@ -429,7 +424,7 @@ def translate(config, sess):
             best_hypo, cost = beam[0]
             print seqs2words(best_hypo, num_to_target)
     duration = time.time() - start_time
-    print >> sys.stderr, 'Translated {} sents in {} sec. Speed {} sents/sec'.format(n_sent, duration, n_sent/duration)
+    logging.info('Translated {} sents in {} sec. Speed {} sents/sec'.format(n_sent, duration, n_sent/duration))
 
 
 def validate(sess, valid_text_iterator, model):
@@ -445,8 +440,8 @@ def validate(sess, valid_text_iterator, model):
         total_loss += loss_per_sentence_out.sum()
         total_seen += x_v_in.shape[1]
         costs += list(loss_per_sentence_out)
-        print >>sys.stderr, "Seen", total_seen
-    print 'Validation loss (AVG/SUM/N_SENT):', total_loss/total_seen, total_loss, total_seen
+        logging.info("Seen {}".format(total_seen))
+    logging.info('Validation loss (AVG/SUM/N_SENT): {} {} {}'.format(total_loss/total_seen, total_loss, total_seen))
     return costs
 
 def validate_helper(config, sess):
@@ -599,18 +594,18 @@ def parse_args():
 
 if __name__ == "__main__":
     config = parse_args()
-    print >>sys.stderr, config
+    initial_setup(config)
+    logging.info(config)
     with tf.Session() as sess:
         if config.adversarial:
             if config.run_validation:
                 wgan_validate_helper(config, sess)
             else:
-                create_save_dir(config)
                 train_wgan(config, sess)
         elif config.translate_valid:
             translate(config, sess)
         elif config.run_validation:
             validate_helper(config, sess)
         else:
-            create_save_dir(config)
             train(config, sess)
+    logging.shutdown()

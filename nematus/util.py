@@ -8,16 +8,57 @@ import cPickle as pkl
 import numpy
 import data_iterator as di
 import os
+import logging
+
+
+def initial_setup(config):
+    translating = config.translate_valid
+    validating = config.run_validation
+    training = not (translating or validating)
+
+    if training:
+        create_save_dir(config)
+    setup_logging(config, training, True)
 
 def create_save_dir(config):
     path = os.path.dirname(os.path.abspath(config.saveto))
-    print >>sys.stderr, 'Creating folder', path, '...',
     os.mkdir(path)
-    print >>sys.stderr, 'Done'
 
+def setup_logging(config, log_to_files, format_logs):
+    if format_logs:
+        format_string = '[%(asctime)s %(levelname)-5s] %(message)s'
+    else:
+        format_string = '%(message)s'
+    formatter = logging.Formatter(format_string)
+
+    logging.basicConfig(level=logging.DEBUG,
+                        format=format_string,
+                        stream=sys.stderr)
+
+    if log_to_files:
+        path = os.path.dirname(os.path.abspath(config.saveto))
+        info_file = os.path.join(path, 'info.log')
+        debug_file = os.path.join(path, 'debug.log') 
+        # save INFO messages into a file
+        f_out = logging.FileHandler(filename=info_file, mode='a', delay=True)
+        f_out.setLevel(logging.DEBUG)
+        f_out.setFormatter(formatter)
+        logging.getLogger('').addHandler(f_out)
+
+        # save DEBUG messages into a file
+        #f_err = logging.FileHandler(filename=debug_file, mode='a', delay=True)
+        #f_err.setLevel(logging.DEBUG)
+        #f_err.setFormatter(formatter)
+        #logging.getLogger('').addHandler(f_err)
+
+        def log_uncaught_exception(exc_type, exc_val, exc_trace):
+            logging.error("Uncaught exception", exc_info=(exc_type, exc_val, exc_trace))
+
+        # handle uncaught exception
+        sys.excepthook = log_uncaught_exception
 
 def load_data(config):
-    print >>sys.stderr, 'Reading data...',
+    logging.info('Reading data...')
     text_iterator = di.TextIterator(
                         source=config.source_dataset,
                         target=config.target_dataset,
@@ -48,7 +89,7 @@ def load_data(config):
                                 maxibatch_size=config.maxibatch_size)
     else:
         valid_text_iterator = None
-    print >>sys.stderr, 'Done'
+    logging.info('Done')
     return text_iterator, valid_text_iterator
 
 def load_dictionaries(config):

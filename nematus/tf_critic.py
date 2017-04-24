@@ -1,5 +1,6 @@
 from tf_model import *
 from util import *
+import logging
 class Generator(StandardModel):
     def __init__(
             self, config,
@@ -73,7 +74,7 @@ class Generator(StandardModel):
         # 3. Use rewards and samples to make the gradient step
 
         samples, samples_mask = self.generate_fakes(sess, x_in, x_mask_in)
-        print 'generated samples', samples.shape
+        logging.info('generated samples {}'.format(samples.shape))
         (seqLen, batch) = samples.shape
 
         rewards = numpy.zeros(dtype=numpy.float32, shape=(seqLen, batch))
@@ -215,10 +216,10 @@ class Critic(StandardModel):
                             key=tf.GraphKeys.TRAINABLE_VARIABLES,
                             scope="Critic")
         if config.use_adam:
-            print 'Optimizer for critic is Adam'
+            logging.info('Optimizer for critic is Adam')
             self.optimizer = tf.train.AdamOptimizer(learning_rate=config.learning_rate)
         else:
-            print 'Optimizer for critic is RMSprop'
+            logging.info('Optimizer for critic is RMSprop')
             self.optimizer = tf.train.RMSPropOptimizer(learning_rate=config.learning_rate)
         self.t = tf.Variable(0, name='time', trainable=False, dtype=tf.int32)
         grad_vars = self.optimizer.compute_gradients(

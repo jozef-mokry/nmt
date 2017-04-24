@@ -3,7 +3,7 @@ import numpy
 import gzip
 
 import shuffle
-from util import load_dict
+import util
 
 def fopen(filename, mode='r'):
     if filename.endswith('.gz'):
@@ -64,8 +64,8 @@ class TextIterator:
             self.target = fopen(target, 'r')
         self.source_dicts = []
         for source_dict in source_dicts:
-            self.source_dicts.append(load_dict(source_dict))
-        self.target_dict = load_dict(target_dict)
+            self.source_dicts.append(util.load_dict(source_dict))
+        self.target_dict = util.load_dict(target_dict)
 
         self.keep_data_in_memory = keep_data_in_memory
         self.batch_size = batch_size

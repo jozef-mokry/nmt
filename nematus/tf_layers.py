@@ -6,6 +6,7 @@ from tf_initializers import ortho_weight, norm_weight
 import tensorflow as tf
 import numpy 
 import sys
+import logging
 
 def matmul3d(x3d, matrix):
     shape = tf.shape(x3d)
@@ -297,7 +298,7 @@ class TextCNNLayer(object):
         num_in_channels = 1
         for num_words, count in filter_sizes_and_counts:
             if count <= 0: 
-                print >>sys.stderr, "Filter", num_words, "with zero count -- skipping"
+                logging.warn("Filter {} with zero count -- skipping".format(num_words))
                 continue
             self.num_features += count
             num_out_channels = count
