@@ -350,10 +350,13 @@ class StandardModel(object):
                         dtype=tf.float32,
                         name='y_mask',
                         shape=(seqLen, batch_size))
-        self.qual_weights = tf.placeholder(
-                        dtype=tf.float32,
-                        name='train_weights',
-                        shape=(batch_size,))
+        self.indices = tf.placeholder(
+                    dtype=tf.int32,
+                    name='indices',
+                    shape=(batch_size))
+        self.use_weights = tf.placeholder(
+                    dtype=tf.bool,
+                    name='use_weights')
 
         with tf.name_scope("encoder"):
             self.encoder = Encoder(config)
@@ -363,11 +366,18 @@ class StandardModel(object):
             self.decoder = Decoder(config, ctx, self.x_mask)
             self.logits = self.decoder.score(self.y)
 
+        with tf.name_scope("qual_weights"):
+            self.qual_weights_layer = EmbeddingLayer(config.n_train_sentences, 1)
+            use_weights_func = lambda: tf.exp(self.qual_weights_layer.forward(self.indices))
+            dont_use_weights_func = lambda: tf.expand_dims(tf.ones_like(self.indices, dtype=tf.float32), axis=1)
+            self.qual_weights = tf.cond(self.use_weights, use_weights_func, dont_use_weights_func)
+
         with tf.name_scope("loss"):
             self.loss_layer = Masked_cross_entropy_loss(self.y, self.y_mask)
             self.loss_per_sentence = self.loss_layer.forward(self.logits)
             self.weighted_loss_per_sentence =  self.loss_per_sentence * self.qual_weights
-            self.mean_loss = tf.reduce_mean(self.weighted_loss_per_sentence, keep_dims=False)
+            self.mean_loss_no_reg = tf.reduce_mean(self.weighted_loss_per_sentence, keep_dims=False)
+            self.mean_loss = self.mean_loss_no_reg - config.gamma * tf.reduce_sum(self.qual_weights)
 
         #with tf.name_scope("optimizer"):
         self.optimizer = tf.train.AdamOptimizer(learning_rate=config.learning_rate)
@@ -383,7 +393,10 @@ class StandardModel(object):
         self.beam_size, self.beam_ys, self.parents, self.cost = None, None, None, None
 
     def get_score_inputs(self):
-        return self.x, self.x_mask, self.y, self.y_mask, self.qual_weights
+        return self.x, self.x_mask, self.y, self.y_mask, self.indices
+    
+    def get_qual_weights(self):
+        return self.qual_weights, self.use_weights
     
     def get_loss(self):
         return self.loss_per_sentence

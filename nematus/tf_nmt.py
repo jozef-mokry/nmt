@@ -91,7 +91,8 @@ def read_all_lines(config, path):
 def train(config, sess):
     model, saver = create_model(config, sess)
 
-    x,x_mask,y,y_mask,qual_weights = model.get_score_inputs()
+    x,x_mask,y,y_mask,indices = model.get_score_inputs()
+    qual_weights, use_weights = model.get_qual_weights()
     apply_grads = model.get_apply_grads()
     t = model.get_global_step()
     loss_per_sentence = model.get_loss()
@@ -110,17 +111,18 @@ def train(config, sess):
     last_time = time.time()
     uidx = sess.run(t)
     print >>sys.stderr, "Initial uidx={}".format(uidx)
+    print >>sys.stderr, "Gamma parameter={}".format(config.gamma)
     STOP = False
     for eidx in xrange(config.max_epochs):
         print 'Starting epoch', eidx
-        for source_sents, target_sents, qual_weights_in in text_iterator:
+        for source_sents, target_sents, indices_in in text_iterator:
             x_in, x_mask_in, y_in, y_mask_in = prepare_data(source_sents, target_sents, maxlen=None)
             if x_in is None:
                 print >>sys.stderr, 'Minibatch with zero sample under length ', config.maxlen
                 continue
             (seqLen, batch_size) = x_in.shape
-            inn = {x:x_in, y:y_in, x_mask:x_mask_in, y_mask:y_mask_in, qual_weights:qual_weights_in}
-            out = [t, apply_grads, mean_loss]
+            inn = {x:x_in, y:y_in, x_mask:x_mask_in, y_mask:y_mask_in, indices:indices_in, use_weights:True}
+            out = [t, apply_grads, mean_loss, qual_weights, model.qual_weights_layer.embeddings]
             if config.summaryFreq and uidx % config.summaryFreq == 0:
                 out += [merged]
             out = sess.run(out, feed_dict=inn)
@@ -131,7 +133,7 @@ def train(config, sess):
             uidx += 1
 
             if config.summaryFreq and uidx % config.summaryFreq == 0:
-                writer.add_summary(out[3], out[0])
+                writer.add_summary(out[-1], out[0])
 
             if config.dispFreq and uidx % config.dispFreq == 0:
                 duration = time.time() - last_time
@@ -142,6 +144,9 @@ def train(config, sess):
                       'Loss/word:', total_loss/n_words, \
                       'Words/sec:', n_words/duration, \
                       'Sents/sec:', n_sents/duration
+                print 'Batch qual. weights:', " ".join([str(cislo) for cislo in out[3].flatten()[:10]]), "..."
+                print 'All qual. weights:', " ".join([str(cislo) for cislo in out[4].flatten()[:1000]]), "..."
+                #print 'ALL ', out[4]
                 last_time = time.time()
                 total_loss = 0.
                 n_sents = 0
@@ -245,11 +250,12 @@ def validate(sess, valid_text_iterator, model):
     costs = []
     total_loss = 0.
     total_seen = 0
-    x,x_mask,y,y_mask,qual_weights = model.get_score_inputs()
+    x,x_mask,y,y_mask,indices = model.get_score_inputs()
+    qual_weights, use_weights = model.get_qual_weights()
     loss_per_sentence = model.get_loss()
-    for x_v, y_v, qual_weights_in in valid_text_iterator:
+    for x_v, y_v, indices_in in valid_text_iterator:
         x_v_in, x_v_mask_in, y_v_in, y_v_mask_in = prepare_data(x_v, y_v, maxlen=None)
-        feeds = {x:x_v_in, x_mask:x_v_mask_in, y:y_v_in, y_mask:y_v_mask_in, qual_weights:qual_weights_in}
+        feeds = {x:x_v_in, x_mask:x_v_mask_in, y:y_v_in, y_mask:y_v_mask_in, indices:indices_in, use_weights:False}
         loss_per_sentence_out = sess.run(loss_per_sentence, feed_dict=feeds)
         total_loss += loss_per_sentence_out.sum()
         total_seen += x_v_in.shape[1]
@@ -341,6 +347,10 @@ def parse_args():
                          help="Set to use layer normalization in encoder and decoder")
     training.add_argument('--use_qual_weights', action="store_true", dest="use_qual_weights",
                          help="Use provided data weights when training")
+    training.add_argument('--n_train_sentences', type=int, default=0, dest="n_train_sentences",
+                         help="Number of sentences in the training dataset")
+    training.add_argument('--gamma', type=float, default=1, dest="gamma",
+                         help="Regularization factor for the qual weights")
 
     validation = parser.add_argument_group('validation parameters')
     validation.add_argument('--valid_source_dataset', type=str, default=None, metavar='PATH', 
