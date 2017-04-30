@@ -367,7 +367,7 @@ class StandardModel(object):
             self.logits = self.decoder.score(self.y)
 
         with tf.name_scope("qual_weights"):
-            self.qual_weights_layer = EmbeddingLayer(config.n_train_sentences, 1)
+            self.qual_weights_layer = EmbeddingLayer(config.n_train_sentences, 1, config.init_qual_weights_rand)
             use_weights_func = lambda: tf.exp(self.qual_weights_layer.forward(self.indices))
             dont_use_weights_func = lambda: tf.expand_dims(tf.ones_like(self.indices, dtype=tf.float32), axis=1)
             self.qual_weights = tf.cond(self.use_weights, use_weights_func, dont_use_weights_func)
@@ -381,13 +381,22 @@ class StandardModel(object):
 
         #with tf.name_scope("optimizer"):
         self.optimizer = tf.train.AdamOptimizer(learning_rate=config.learning_rate)
+        self.qual_weights_optimizer = tf.train.AdamOptimizer(learning_rate=config.qual_weights_lr) # my optimizer
         self.t = tf.Variable(0, name='time', trainable=False, dtype=tf.int32)
         grad_vars = self.optimizer.compute_gradients(self.mean_loss)
         grads, varss = zip(*grad_vars)
         clipped_grads, global_norm = tf.clip_by_global_norm(grads, clip_norm=config.clip_c)
         # Might be interesting to see how the global norm changes over time, attach a summary?
         grad_vars = zip(clipped_grads, varss)
-        self.apply_grads = self.optimizer.apply_gradients(grad_vars, global_step=self.t)
+        new_grad_vars = []
+        my_grad_vars = []
+        for grad, var in grad_vars:
+            if var.name == "qual_weights/embeddings:0":
+                my_grad_vars.append((grad,var))
+            else:
+                new_grad_vars.append((grad,var))
+        self.apply_grads = self.optimizer.apply_gradients(new_grad_vars, global_step=self.t)
+        self.apply_grads = self.qual_weights_optimizer.apply_gradients(my_grad_vars, global_step=self.t)
 
         self.sampled_ys = None
         self.beam_size, self.beam_ys, self.parents, self.cost = None, None, None, None

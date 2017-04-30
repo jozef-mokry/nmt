@@ -345,12 +345,17 @@ def parse_args():
                          help='size of maxibatch (number of minibatches that are sorted by length) (default: %(default)s)')
     training.add_argument('--use_layer_norm', action="store_true", dest="use_layer_norm",
                          help="Set to use layer normalization in encoder and decoder")
+
     training.add_argument('--use_qual_weights', action="store_true", dest="use_qual_weights",
                          help="Use provided data weights when training")
     training.add_argument('--n_train_sentences', type=int, default=0, dest="n_train_sentences",
                          help="Number of sentences in the training dataset")
     training.add_argument('--gamma', type=float, default=1, dest="gamma",
                          help="Regularization factor for the qual weights")
+    training.add_argument('--qual_weights_lr', type=float, default=0.01, metavar='FLOAT',
+                         help="learning rate for the quality weights (default: %(default)s)")
+    training.add_argument('--init_qual_weights_rand', action="store_false", dest="init_qual_weights_rand",
+                         help="initialize quality weights randomly (normal)")
 
     validation = parser.add_argument_group('validation parameters')
     validation.add_argument('--valid_source_dataset', type=str, default=None, metavar='PATH', 
