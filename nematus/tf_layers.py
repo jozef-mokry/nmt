@@ -35,12 +35,12 @@ class EmbeddingLayer(object):
     def __init__(self,
                  vocabulary_size,
                  embedding_size,
-                 init_zeros=False):
-        if init_zeros:
-            self.embeddings = tf.Variable(tf.zeros([vocabulary_size, embedding_size]),
+                 init_rand=True):
+        if init_rand:
+            self.embeddings = tf.Variable(norm_weight(vocabulary_size, embedding_size),
                                       name='embeddings')
         else:
-            self.embeddings = tf.Variable(norm_weight(vocabulary_size, embedding_size),
+            self.embeddings = tf.Variable(tf.zeros([vocabulary_size, embedding_size]),
                                       name='embeddings')
     
     def forward(self, x):

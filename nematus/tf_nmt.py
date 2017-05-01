@@ -352,9 +352,9 @@ def parse_args():
                          help="Number of sentences in the training dataset")
     training.add_argument('--gamma', type=float, default=1, dest="gamma",
                          help="Regularization factor for the qual weights")
-    training.add_argument('--qual_weights_lr', type=float, default=0.01, metavar='FLOAT',
+    training.add_argument('--qual_weights_lr', type=float, default=0.0001, metavar='FLOAT',
                          help="learning rate for the quality weights (default: %(default)s)")
-    training.add_argument('--init_qual_weights_rand', action="store_false", dest="init_qual_weights_rand",
+    training.add_argument('--init_qual_weights_rand', action="store_true", dest="init_qual_weights_rand",
                          help="initialize quality weights randomly (normal)")
 
     validation = parser.add_argument_group('validation parameters')
