@@ -395,8 +395,9 @@ class StandardModel(object):
                 my_grad_vars.append((grad,var))
             else:
                 new_grad_vars.append((grad,var))
-        self.apply_grads = self.optimizer.apply_gradients(new_grad_vars, global_step=self.t)
-        self.apply_grads = self.qual_weights_optimizer.apply_gradients(my_grad_vars, global_step=self.t)
+        self.apply_grads = []
+        self.apply_grads.append(self.optimizer.apply_gradients(new_grad_vars, global_step=self.t))
+        self.apply_grads.append(self.qual_weights_optimizer.apply_gradients(my_grad_vars, global_step=self.t))
 
         self.sampled_ys = None
         self.beam_size, self.beam_ys, self.parents, self.cost = None, None, None, None
