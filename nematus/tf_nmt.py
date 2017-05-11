@@ -195,9 +195,10 @@ def create_wgan(config):
         logging.info("Initializing params...")
         sess.run(init_op)
         logging.info('Done')
-        logging.info('Clipping critic...')
-        scale_critics_params(sess, config)
-        logging.info('Done')
+        if config.weight_clip > 0:
+            logging.info('Clipping critic...')
+            scale_critics_params(sess, config)
+            logging.info('Done')
         if config.reload_generator:
             logging.info('Reloading generator...')
             reload_generator(sess, config)

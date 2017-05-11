@@ -141,9 +141,14 @@ class CNNCritic(object):
             clipped_grads, global_norm = tf.clip_by_global_norm(grads, clip_norm=config.clip_c)
             grad_vars = zip(clipped_grads, varss)
         self.apply_grads = self.optimizer.apply_gradients(grad_vars, global_step=self.t)
-        with tf.control_dependencies([self.apply_grads]):
-            self.clip_vars = [v.assign(tf.clip_by_value(v, -config.weight_clip, config.weight_clip)) \
-                                for v in critic_vars]
+        if config.weight_clip > 0:
+            logging.info("Weights will be clipped to {}".format(config.weight_clip))
+            with tf.control_dependencies([self.apply_grads]):
+                self.clip_vars = [v.assign(tf.clip_by_value(v, -config.weight_clip, config.weight_clip)) \
+                                    for v in critic_vars]
+        else:
+            logging.info("Weights will not be clipped")
+            self.clip_vars = []
 
     def run_gradient_step(
             self, sess,
