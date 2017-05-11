@@ -319,17 +319,32 @@ def wgan_validate(config, sess, generator, critic, text_iterator):
         neg_fake = (all_fake < 0).mean()
         total_loss = (-all_true + all_fake).sum()
     msg = 'Validation loss (AVG/SUM/N_SENT/ACC/POS_TRUE/NEG_FAKE): {} {} {} {} {} {}'
-    logging.info(msg.format(total_loss/total_seen, total_loss, total_seen, accuracy, pos_true, neg_fake))
-    logging.info('True: mean/std/min/max {}/{}/{}/{}'.format(
-                                                all_true.mean(),
-                                                all_true.std(),
-                                                all_true.min(),
-                                                all_true.max()))
-    logging.info('Fake: mean/std/min/max {}/{}/{}/{}'.format(
-                                                all_fake.mean(),
-                                                all_fake.std(),
-                                                all_fake.min(),
-                                                all_fake.max()))
+    if not config.run_validation:
+        logging.info(msg.format(total_loss/total_seen, total_loss, total_seen, accuracy, pos_true, neg_fake))
+        logging.info('True: mean/std/min/max {}/{}/{}/{}'.format(
+                                                    all_true.mean(),
+                                                    all_true.std(),
+                                                    all_true.min(),
+                                                    all_true.max()))
+        logging.info('Fake: mean/std/min/max {}/{}/{}/{}'.format(
+                                                    all_fake.mean(),
+                                                    all_fake.std(),
+                                                    all_fake.min(),
+                                                    all_fake.max()))
+    else:
+        print(msg.format(total_loss/total_seen, total_loss, total_seen, accuracy, pos_true, neg_fake))
+        print('True: mean/std/min/max {}/{}/{}/{}'.format(
+                                                    all_true.mean(),
+                                                    all_true.std(),
+                                                    all_true.min(),
+                                                    all_true.max()))
+        print('Fake: mean/std/min/max {}/{}/{}/{}'.format(
+                                                    all_fake.mean(),
+                                                    all_fake.std(),
+                                                    all_fake.min(),
+                                                    all_fake.max()))
+
+    print_validation_results(config, all_true, all_fake, sent_true, sent_fake)
     return all_true, all_fake, sent_true, sent_fake
 
 def wgan_validate_helper(config, sess):
@@ -355,6 +370,9 @@ def wgan_validate_helper(config, sess):
                                                 valid_text_iterator)
     assert len(all_true) == len(sent_true), "{} {}".format(len(all_true), len(sent_true))
     assert len(all_fake) == len(sent_fake), "{} {}".format(len(all_fake), len(sent_fake))
+    #print_validation_results(config, all_true, all_fake, sent_true, sent_fake)
+
+def print_validation_results(config, all_true, all_fake, sent_true, sent_fake):
     source_to_num, target_to_num, num_to_source, num_to_target = load_dictionaries(config)
     print 'True sentences'
     for score, (sent, x) in zip(all_true, sent_true):
