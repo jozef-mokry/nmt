@@ -75,17 +75,30 @@ class CNNCritic(object):
             samples_embs *= tf.expand_dims(self.samples_maskT, axis=2) #zero-out embeddings for pad symbols
         with tf.name_scope("y_cnn_layer"):
             self.samples_features = self.y_cnn.forward(tf.expand_dims(samples_embs, axis=3), x_maskT=self.samples_maskT)
-            #self.samples_features = tf.Print(self.samples_features, [tf.reduce_sum(self.samples_features, axis=1)], "Samples features")
+            self.samples_features = tf.Print(self.samples_features, [tf.reduce_sum(self.samples_features, axis=1)], "Samples features")
 
         ###### compute scores
         xy_features = tf.concat([self.x_features, self.y_features], axis=1) # batch, 2*num_features
         xsamples_features = tf.concat([self.x_features, self.samples_features], axis=1) # batch, 2*num_features
-        if config.sigmoid_score:
-            non_linearity = tf.nn.sigmoid
-        else:
-            non_linearity = lambda x: x
         num_features = sum(config.filter_counts)
         with tf.name_scope("score_layer"):
+            self.hidden_layers = []
+            for i in range(1, config.num_layers):
+                with tf.name_scope("hidden_" + str(i)):
+                    logging.debug("Creating hidden layer {}".format(i))
+                    layer = FeedForwardLayer(
+                                        in_size=2*num_features,
+                                        out_size=2*num_features,
+                                        non_linearity=tf.nn.tanh)
+                    self.hidden_layers.append(layer)
+                    xy_features = layer.forward(xy_features)
+                    xsamples_features = layer.forward(xsamples_features)
+                    xy_features = tf.Print(xy_features, [tf.reduce_sum(xy_features, axis=1)], "xy_features {}".format(i))
+                    xsamples_features = tf.Print(xsamples_features, [tf.reduce_sum(xsamples_features, axis=1)], "xsamples_features {}".format(i))
+            if config.sigmoid_score:
+                non_linearity = tf.nn.sigmoid
+            else:
+                non_linearity = lambda x: x
             self.features_to_score_layer = FeedForwardLayer(
                                             in_size=2*num_features,
                                             out_size=1,

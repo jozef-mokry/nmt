@@ -586,6 +586,8 @@ def parse_args():
     adversarial.add_argument('--filter_sizes', type=int, default=None, nargs='+', metavar='INT',
                          help="list of filter sizes")
     adversarial.add_argument('--use_cnn_critic', action="store_true", help="")
+    adversarial.add_argument('--num_layers', type=int, default=1, metavar='INT',
+                         help="Number of hidden layers")
     config = parser.parse_args()
     return config
 
