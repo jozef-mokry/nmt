@@ -314,7 +314,7 @@ class TextCNNLayer(object):
                             dtype=tf.float32,
                             name='W-{}x{}'.format(num_words, num_out_channels))
             self.filters.append(W)
-        b_init = numpy.zeros((self.num_features,))
+        b_init = numpy.zeros((self.num_features,)) + 0.1
         self.b = tf.Variable(b_init, dtype=tf.float32, name='b')
 
     def forward(self, x, x_maskT):
