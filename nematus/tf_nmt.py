@@ -155,6 +155,23 @@ def reload_generator(sess, config):
     gen_saver = tf.train.Saver(var_list=name_mapping)
     gen_saver.restore(sess, os.path.abspath(config.reload))
 
+def reload_critic(sess, config):
+    critic_vars = tf.get_collection(
+                        key=tf.GraphKeys.TRAINABLE_VARIABLES,
+                        scope="Critic")
+    name_mapping = {}
+    for v in critic_vars:
+        logging.debug(v.name)
+    for v in critic_vars:
+        if v.name.startswith('Critic/') and 'state_to_score' not in v.name:
+            old_name = v.name[len('Critic/'):].rsplit(':', 1)[0]
+            name_mapping[old_name] = v
+            logging.debug('{} -> {}'.format(v.name, old_name))
+        else:
+            logging.warn('Skipping {}'.format(v.name))
+    dummy_saver = tf.train.Saver(var_list=name_mapping)
+    dummy_saver.restore(sess, os.path.abspath(config.reload_critic))
+
 def scale_critics_params(sess, config):
     critic_vars = tf.get_collection(
                         key=tf.GraphKeys.TRAINABLE_VARIABLES,
@@ -205,6 +222,11 @@ def create_wgan(config):
             logging.info('Reloading generator...')
             reload_generator(sess, config)
             logging.info('Done')
+        if config.reload_critic:
+            logging.info('Reloading critic...')
+            reload_critic(sess, config)
+            logging.info('Done')
+
     else:
         logging.info("Reloading critic and generator from: {}".format(config.reload_critic_and_generator))
         saver.restore(sess, os.path.abspath(config.reload_critic_and_generator))
@@ -602,6 +624,8 @@ def parse_args():
                          help="Scores will be passed through sigmoid and loss will be cross-entropy")
     adversarial.add_argument('--reload_critic_and_generator', type=str, default=None, metavar='PATH',
                          help="load existing critcit and generator from this path")
+    adversarial.add_argument('--reload_critic', type=str, default=None, metavar='PATH',
+                         help="load existing critcit from this path")
     adversarial.add_argument('--filter_counts', type=int, default=None, nargs='+', metavar='INT',
                          help="list of filter counts: '--filter_counts 250 200 50' for total number of features 500 (default: %(default)s)")
     adversarial.add_argument('--filter_sizes', type=int, default=None, nargs='+', metavar='INT',
