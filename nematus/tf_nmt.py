@@ -10,6 +10,7 @@ from threading import Thread
 from Queue import Queue
 from datetime import datetime
 from tf_critic import *
+from tf_generator import *
 from tf_cnn_critic import *
 import logging
 
