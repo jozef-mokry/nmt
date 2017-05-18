@@ -180,13 +180,14 @@ def create_wgan(config):
     generator = Generator(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask)
     logging.info('Done')
     logging.info('Critic...')
+    fakes = generator.decoder.sample()
+    fakes_mask = create_samples_mask(fakes)
     if config.use_cnn_critic:
-        fakes = generator.decoder.sample()
-        fakes_mask = create_samples_mask(fakes)
         critic = CNNCritic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask,
                            samples=fakes, samples_mask=fakes_mask)
     else:
-        critic = Critic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask, generator=generator)
+        critic = Critic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask,
+                        samples=fakes, samples_mask=fakes_mask)
     logging.info('Done')
     #generator._build_prefix_score(config, critic)
 

@@ -6,9 +6,10 @@ class Critic(StandardModel):
             self, config,
             x, x_mask, 
             y, y_mask,
-            generator):
+            samples, samples_mask):
 
-        self.generator = generator
+        self.samples = samples
+        self.samples_mask = samples_mask
         with tf.name_scope("Critic"):
             super(Critic, self).__init__(
                     config,
@@ -16,7 +17,6 @@ class Critic(StandardModel):
                     x_mask=x_mask,
                     y=y,
                     y_mask=y_mask)
-            self.score_per_sentence = self.score(y, y_mask, back_prop=False)
 
     def _build_decoder(self, config):
         with tf.name_scope("encoder"):
@@ -25,26 +25,27 @@ class Critic(StandardModel):
             self.decoder = CriticDecoder(config, self.ctx, self.x_mask)
 
     def _build_loss(self, config):
-        fakes = self.generator.decoder.sample()
-        lengths = tf.reduce_sum(
-                    tf.cast(tf.not_equal(fakes, 0), dtype=tf.float32),
-                    axis=0)
-        lengths = tf.where(tf.equal(fakes[-1], 0), lengths + 1, lengths) #Add 1 for eos if reached
-        fakes_mask = tf.transpose(tf.sequence_mask(lengths, dtype=tf.float32)) 
-
         with tf.name_scope("decoder"):
             scores = self.decoder.score_true_and_fake(
                             self.y,
                             self.y_mask,
-                            fakes,
-                            fakes_mask)
-            true_scores, fake_scores = tf.split(scores, 2, axis=0)
-            self.true_scores_mean = tf.reduce_mean(true_scores)
-            self.fake_scores_mean = tf.reduce_mean(fake_scores)
-            self.mean_loss = -self.true_scores_mean + self.fake_scores_mean
+                            self.samples,
+                            self.samples_mask)
+            if config.sigmoid_score:
+                # log loss and sigmoid
+                self.true_scores, self.fake_scores = tf.split(tf.nn.sigmoid(scores), 2, axis=0)
+                self.true_loss = tf.log(self.true_scores)
+                self.fake_loss = -tf.log(1. - self.fake_scores)
+            else:
+                # wasserstein loss
+                self.true_scores, self.fake_scores = tf.split(scores, 2, axis=0)
+                self.true_loss = self.true_scores
+                self.fake_loss = self.fake_scores
+            self.mean_true_loss = tf.reduce_mean(self.true_loss)
+            self.mean_fake_loss = tf.reduce_mean(self.fake_loss)
+            self.mean_loss = self.mean_fake_loss - self.mean_true_loss
 
     def _build_optimizer(self, config):
-        # Use RMSProp
         critic_vars = tf.get_collection(
                             key=tf.GraphKeys.TRAINABLE_VARIABLES,
                             scope="Critic")
@@ -62,9 +63,14 @@ class Critic(StandardModel):
         clipped_grads, global_norm = tf.clip_by_global_norm(grads, clip_norm=config.clip_c)
         grad_vars = zip(clipped_grads, varss)
         self.apply_grads = self.optimizer.apply_gradients(grad_vars, global_step=self.t)
-        with tf.control_dependencies([self.apply_grads]):
-            self.clip_vars = [v.assign(tf.clip_by_value(v, -config.weight_clip, config.weight_clip)) \
-                                for v in critic_vars]
+        if config.weight_clip > 0:
+            logging.info("Weights will be clipped to {}".format(config.weight_clip))
+            with tf.control_dependencies([self.apply_grads]):
+                self.clip_vars = [v.assign(tf.clip_by_value(v, -config.weight_clip, config.weight_clip)) \
+                                    for v in critic_vars]
+        else:
+            logging.info("Weights will not be clipped")
+            self.clip_vars = []
 
     def run_gradient_step(
             self, sess,
@@ -74,69 +80,47 @@ class Critic(StandardModel):
                self.x_mask: x_mask_in,
                self.y: true_in,
                self.y_mask: true_mask_in}
-        _, mean_loss, _, true_scores_mean, fake_scores_mean = sess.run([self.apply_grads, self.mean_loss, self.clip_vars, self.true_scores_mean, self.fake_scores_mean], inn)
-        return mean_loss, true_scores_mean, fake_scores_mean
+        _, _, mean_loss, mean_true_loss, mean_fake_loss = sess.run(
+                [self.apply_grads,
+                 self.clip_vars,
+                 self.mean_loss,
+                 self.mean_true_loss,
+                 self.mean_fake_loss], inn)
+        return mean_loss, mean_true_loss, mean_fake_loss
 
-    def score(self, y, y_mask, back_prop):
-        return self.decoder.score(y, y_mask, back_prop)
-
-    def get_score_per_sentence(self, sess, x_in, x_mask_in, y_in, y_mask_in):
-        inn = { self.x: x_in,
-                self.y: y_in,
-                self.x_mask: x_mask_in,
-                self.y_mask: y_mask_in}
-        return sess.run(self.score_per_sentence, feed_dict=inn)
+    def get_true_scores(self):
+        return self.true_scores
+    def get_fake_scores(self):
+        return self.fake_scores
+    def get_x(self):
+        return self.x
+    def get_x_mask(self):
+        return self.x_mask
+    def get_y(self):
+        return self.y
+    def get_y_mask(self):
+        return self.y_mask
+    def get_samples(self):
+        return self.samples
 
 class CriticDecoder(Decoder):    
     def __init__(self, config, context, x_mask):
         super(CriticDecoder, self).__init__(config, context, x_mask)
 
         with tf.name_scope("state_to_score"):
-            self.state_to_hidden_layer = FeedForwardLayer(
-                                            in_size=config.state_size,
-                                            out_size=config.state_size)
-            self.hidden_to_score_layer = FeedForwardLayer(
+            self.hidden_layers = []
+            for i in range(1, config.num_layers):
+                with tf.name_scope("hidden_" + str(i)):
+                    logging.debug("Creating hidden layer {}".format(i))
+                    self.hidden_layers.append(FeedForwardLayer(
+                                                in_size=config.state_size,
+                                                out_size=config.state_size,
+                                                non_linearity=tf.nn.tanh))
+
+            self.last_hidden_to_score_layer = FeedForwardLayer(
                                             in_size=config.state_size,
                                             out_size=1,
                                             non_linearity=lambda x: x)
-
-    def score(self, y, y_mask, back_prop):
-        with tf.name_scope("y_embeddings_layer"):
-            seq_len = tf.shape(y)[0]
-            y_but_last = tf.slice(y, [0,0], [seq_len - 1, -1])
-            y_embs = self.y_emb_layer.forward(y_but_last)
-            y_embs = tf.pad(y_embs,
-                            mode='CONSTANT',
-                            paddings=[[1,0],[0,0],[0,0]]) # prepend zeros
-
-        gates_x, proposal_x = self.grustep1.precompute_from_x(y_embs)
-
-        def cond(i, prev_state):
-            return tf.less(i, seq_len)
-
-        def body(i, prev_state):
-            gates_x2d = gates_x[i]
-            proposal_x2d = proposal_x[i]
-            state = self.grustep1.forward(
-                        prev_state,
-                        gates_x=gates_x2d,
-                        proposal_x=proposal_x2d)
-            att_ctx = self.attstep.forward(state) 
-            state = self.grustep2.forward(state, att_ctx)
-            # Use y_mask here - because the last state must be correct
-            state = tf.where(tf.equal(y_mask[i], 0.), prev_state, state)
-            return i+1, state
-
-        _, last_state = tf.while_loop(
-                            cond=cond,
-                            body=body,
-                            loop_vars=[tf.constant(0), self.init_state],
-                            back_prop=back_prop)
-
-        hidden = self.state_to_hidden_layer.forward(last_state)
-        score = self.hidden_to_score_layer.forward(hidden)
-        score = tf.squeeze(score, axis=1)
-        return score
 
     def _pad_and_concat(self, x, y):
         #concat x and y along axis=1, and pad to same length along axis0
@@ -169,7 +153,7 @@ class CriticDecoder(Decoder):
     def score_true_and_fake(self, y, y_mask, fake, fake_mask):
         y = self._pad_and_concat(y, fake)
         y_mask = self._pad_and_concat(y_mask, fake_mask)
-        self._repeat_init_state()
+        self._repeat_init_state() 
         with tf.name_scope("y_embeddings_layer"):
             seq_len = tf.shape(y)[0]
             y_but_last = tf.slice(y, [0,0], [seq_len - 1, -1])
@@ -179,31 +163,31 @@ class CriticDecoder(Decoder):
                             paddings=[[1,0],[0,0],[0,0]]) # prepend zeros
 
         gates_x, proposal_x = self.grustep1.precompute_from_x(y_embs)
-
-        def cond(i, prev_state):
-            return tf.less(i, seq_len)
-
-        def body(i, prev_state):
-            gates_x2d = gates_x[i]
-            proposal_x2d = proposal_x[i]
+        def step_fn(prev_state, x):
+            gates_x2d = x[0]
+            proposal_x2d = x[1]
             state = self.grustep1.forward(
                         prev_state,
                         gates_x=gates_x2d,
                         proposal_x=proposal_x2d)
             att_ctx = self.attstep_rep.forward(state) 
             state = self.grustep2.forward(state, att_ctx)
-            # Use y_mask here - because the last state must be correct
-            state = tf.where(tf.equal(y_mask[i], 0.), prev_state, state)
-            return i+1, state
+            return state
 
-        _, last_state = tf.while_loop(
-                            cond=cond,
-                            body=body,
-                            loop_vars=[tf.constant(0), self.init_state_rep],
-                            back_prop=True)
+        self.states = RecurrentLayer(
+                    initial_state=self.init_state_rep,
+                    step_fn=step_fn).forward((gates_x, proposal_x))
 
-        hidden = self.state_to_hidden_layer.forward(last_state)
-        score = self.hidden_to_score_layer.forward(hidden)
+        y_mask = tf.expand_dims(y_mask, axis=2) # (seqLen, batch, 1)
+        self.states = self.states * y_mask
+        sum_state = tf.reduce_sum(self.states, axis=0)
+        lengths = tf.reduce_sum(y_mask, axis=0)
+        mean_state = sum_state / lengths
+
+        hidden = mean_state
+        for layer in self.hidden_layers:
+            hidden = layer.forward(hidden)
+        score = self.last_hidden_to_score_layer.forward(hidden)
         score = tf.squeeze(score, axis=1)
         return score
 
