@@ -27,6 +27,7 @@ class Critic(StandardModel):
     def _build_loss(self, config):
         with tf.name_scope("decoder"):
             scores = self.decoder.score_true_and_fake(
+                            config,
                             self.y,
                             self.y_mask,
                             self.samples,
@@ -150,7 +151,7 @@ class CriticDecoder(Decoder):
         self.attstep_rep.context_mask = tf.concat([self.attstep_rep.context_mask,self.attstep_rep.context_mask], axis=1)  
         self.attstep_rep.hidden_from_context = tf.concat([self.attstep_rep.hidden_from_context,self.attstep_rep.hidden_from_context], axis=1)  
 
-    def score_true_and_fake(self, y, y_mask, fake, fake_mask):
+    def score_true_and_fake(self, config, y, y_mask, fake, fake_mask):
         y = self._pad_and_concat(y, fake)
         y_mask = self._pad_and_concat(y_mask, fake_mask)
         self._repeat_init_state() 
@@ -180,9 +181,12 @@ class CriticDecoder(Decoder):
 
         y_mask = tf.expand_dims(y_mask, axis=2) # (seqLen, batch, 1)
         self.states = self.states * y_mask
-        sum_state = tf.reduce_sum(self.states, axis=0)
-        lengths = tf.reduce_sum(y_mask, axis=0)
-        mean_state = sum_state / lengths
+        if not config.use_max_state:
+            sum_state = tf.reduce_sum(self.states, axis=0)
+            lengths = tf.reduce_sum(y_mask, axis=0)
+            mean_state = sum_state / lengths
+        else:
+            mean_state = tf.reduce_max(self.states, axis=0)
 
         hidden = mean_state
         for layer in self.hidden_layers:

@@ -620,6 +620,7 @@ def parse_args():
     adversarial.add_argument('--no_generator_reload', action="store_false", dest="reload_generator",
                          help="")
     adversarial.add_argument('--use_adam', action="store_true", help="")
+    adversarial.add_argument('--use_max_state', action="store_true", help="")
     adversarial.add_argument('--sigmoid_score', action="store_true", dest="sigmoid_score",
                          help="Scores will be passed through sigmoid and loss will be cross-entropy")
     adversarial.add_argument('--reload_critic_and_generator', type=str, default=None, metavar='PATH',
