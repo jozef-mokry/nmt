@@ -89,7 +89,7 @@ class Decoder(object):
        sampled_ys = ys_array.gather(tf.range(0, i))
        return sampled_ys
 
-    def beam_search(self, beam_size):
+    def beam_search(self, beam_size, init_loop_vars=None):
 
         """
         Strategy:
@@ -123,7 +123,10 @@ class Decoder(object):
                     size=self.translation_maxlen,
                     clear_after_read=True,
                     name='parent_idx_array')
-        init_loop_vars = [i, self.init_state, init_ys, init_embs, init_cost, ys_array, p_array]
+        if init_loop_vars is None:
+            init_loop_vars = [i, self.init_state, init_ys, init_embs, init_cost, ys_array, p_array]
+        else:
+            init_loop_vars += [init_cost, ys_array, p_array]
 
         # Prepare cost matrix for completed sentences -> Prob(EOS) = 1 and Prob(x) = 0
         eos_log_probs = tf.constant(
@@ -188,7 +191,7 @@ class Decoder(object):
         cost = tf.abs(cost) #to get negative-log-likelihood
         return sampled_ys, parents, cost
 
-    def score(self, y):
+    def score(self, y, return_states=False):
         with tf.name_scope("y_embeddings_layer"):
             y_but_last = tf.slice(y, [0,0], [tf.shape(y)[0]-1, -1])
             y_embs = self.y_emb_layer.forward(y_but_last)
@@ -197,6 +200,7 @@ class Decoder(object):
                             paddings=[[1,0],[0,0],[0,0]]) # prepend zeros
 
         init_attended_context = tf.zeros([tf.shape(self.init_state)[0], self.state_size*2])
+        print 'Created init_attended_context'
         init_state_att_ctx = (self.init_state, init_attended_context)
         gates_x, proposal_x = self.grustep1.precompute_from_x(y_embs)
         def step_fn(prev, x):
@@ -217,7 +221,30 @@ class Decoder(object):
                                     initial_state=init_state_att_ctx,
                                     step_fn=step_fn).forward((gates_x, proposal_x))
         logits = self.predictor.get_logits(y_embs, states, attended_states, multi_step=True)
-        return logits
+        if not return_states:
+            return logits
+        else:
+            return logits, states
+
+    def late_beam_search(self, lateness, y, beam_size):
+        
+        print 'Calling late_beam_Search'
+        with tf.name_scope("late_beam_search"):
+            lateness = tf.minimum(lateness, tf.shape(y)[0])
+            remaining = tf.shape(y)[0] - lateness
+            y_before, y_after = tf.split(y, axis=0, num_or_size_splits=[lateness, remaining])
+            #TODO: does this work with empty sentences? 
+            logits, states = self.score(y_before, return_states=True)
+
+            prev_ys = y_before[-1]
+            prev_embs = self.y_emb_layer.forward(prev_ys)
+            init_loop_vars = [0, states[-1], prev_ys, prev_embs]
+            sampled_ys, parents, cost = self.beam_search(beam_size, init_loop_vars)
+            return sampled_ys, parents, cost
+
+
+
+
 
 class Predictor(object):
     def __init__(self, config):
@@ -381,6 +408,8 @@ class StandardModel(object):
 
         self.sampled_ys = None
         self.beam_size, self.beam_ys, self.parents, self.cost = None, None, None, None
+        lateness = 3
+        self.late_beam_ys, self.late_parents, self.late_cost = self.decoder.late_beam_search(lateness, self.y, config.beam_size)
 
     def get_score_inputs(self):
         return self.x, self.x_mask, self.y, self.y_mask, self.qual_weights
@@ -434,6 +463,28 @@ class StandardModel(object):
                                                     [beam_ys, parents, cost],
                                                     feed_dict=feeds)
         hypotheses = self._reconstruct(beam_ys_out, parents_out, cost_out, beam_size)
+        return hypotheses
+
+    def late_beam_search(self, session, x_in, x_mask_in, y_in, beam_size, lateness):
+        print 'in late_beam_search'
+        x_in = numpy.repeat(x_in, repeats=beam_size, axis=1)
+        x_mask_in = numpy.repeat(x_mask_in, repeats=beam_size, axis=1)
+        y_in_copied = numpy.repeat(y_in, repeats=beam_size, axis=1)
+        feeds = {self.x : x_in, self.x_mask : x_mask_in, self.y : y_in_copied}
+        beam_ys_out, parents_out, cost_out = session.run(
+                                                    [self.late_beam_ys, self.late_parents, self.late_cost],
+                                                    feed_dict=feeds)
+        print 'going to reconstruct'
+        hypotheses = self._reconstruct(beam_ys_out, parents_out, cost_out, beam_size)
+        print 'done reconstructing'
+
+        # prepending with lateness number of words
+        for i in xrange(len(hypotheses)):
+            h = hypotheses[i] # list of tuples ([], score)
+            beginning = list(y_in[:lateness,i])
+            for j in xrange(len(h)):
+                h[j] = (beginning + h[j][0], h[j][1])
+
         return hypotheses
 
     def _reconstruct(self, ys, parents, cost, beam_size):

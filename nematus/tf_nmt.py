@@ -87,6 +87,31 @@ def read_all_lines(config, path):
 
     return batches, idxs
 
+def read_all_lines_with_target(config, path_source, path_target):
+    source_to_num, target_to_num, _, _ = load_dictionaries(config)
+
+    lines = map(lambda l: l.strip().split(), open(path_source, 'r').readlines())
+    fn = lambda w: [source_to_num[w] if w in source_to_num else 1] # extra [ ] brackets for factor dimension
+    lines = map(lambda l: map(lambda w: fn(w), l), lines)
+    lines = numpy.array(lines)
+    lengths = numpy.array(map(lambda l: len(l), lines))
+    lengths = numpy.array(lengths)
+    idxs = lengths.argsort()
+    lines = lines[idxs]
+
+    lines_target = map(lambda l: l.strip().split(), open(path_target, 'r').readlines())
+    fn_target = lambda w: target_to_num[w] if w in target_to_num else 1 # extra [ ] brackets for factor dimension
+    lines_target = map(lambda l: map(lambda w: fn_target(w), l), lines_target)
+    lines_target = numpy.array(lines_target)
+    lines_target = lines_target[idxs] # sort target the same way as source
+
+    #merge into batches
+    batches = []
+    for i in range(0, len(lines), config.valid_batch_size):
+        batch = (lines[i:i+config.valid_batch_size], lines_target[i:i+config.valid_batch_size])
+        batches.append(batch)
+
+    return batches, idxs
 
 def train(config, sess):
     model, saver = create_model(config, sess)
@@ -187,7 +212,7 @@ def translate(config, sess):
     print >>sys.stderr, "NOTE: Length of translations is capped to {}".format(config.translation_maxlen)
 
     n_sent = 0
-    batches, idxs = read_all_lines(config, config.valid_source_dataset)
+    batches, idxs = read_all_lines_with_target(config, config.valid_source_dataset, config.valid_target_dataset)
     in_queue, out_queue = Queue(), Queue()
     model._get_beam_search_outputs(config.beam_size)
     
@@ -196,14 +221,16 @@ def translate(config, sess):
             job = in_queue.get()
             if job is None:
                 break
-            idx, x = job
-            y_dummy = numpy.zeros(shape=(len(x),1))
-            x, x_mask, _, _ = prepare_data(x, y_dummy, maxlen=None)
-            try:
-                samples = model.beam_search(sess, x, x_mask, config.beam_size)
-                out_queue.put((idx, samples))
-            except:
-                in_queue.put(job)
+            idx, batch = job
+            x, y = batch
+            print 'Got a job', idx
+            #y_dummy = numpy.zeros(shape=(len(x),1))
+            x, x_mask, y, _ = prepare_data(x, y, maxlen=None)
+            # TODO: send the y's
+            samples = model.late_beam_search(sess, x, x_mask, y, config.beam_size, 3)
+            print 'Got response', idx
+            out_queue.put((idx, samples))
+            #in_queue.put(job)
 
     threads = [None] * config.n_threads
     for i in xrange(config.n_threads):
