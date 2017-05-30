@@ -200,7 +200,6 @@ class Decoder(object):
                             paddings=[[1,0],[0,0],[0,0]]) # prepend zeros
 
         init_attended_context = tf.zeros([tf.shape(self.init_state)[0], self.state_size*2])
-        print 'Created init_attended_context'
         init_state_att_ctx = (self.init_state, init_attended_context)
         gates_x, proposal_x = self.grustep1.precompute_from_x(y_embs)
         def step_fn(prev, x):
@@ -228,7 +227,6 @@ class Decoder(object):
 
     def late_beam_search(self, lateness, y, beam_size):
         
-        print 'Calling late_beam_Search'
         with tf.name_scope("late_beam_search"):
             lateness = tf.minimum(lateness, tf.shape(y)[0])
             remaining = tf.shape(y)[0] - lateness
@@ -408,7 +406,7 @@ class StandardModel(object):
 
         self.sampled_ys = None
         self.beam_size, self.beam_ys, self.parents, self.cost = None, None, None, None
-        lateness = 3
+        lateness = config.lateness
         self.late_beam_ys, self.late_parents, self.late_cost = self.decoder.late_beam_search(lateness, self.y, config.beam_size)
 
     def get_score_inputs(self):
@@ -466,7 +464,6 @@ class StandardModel(object):
         return hypotheses
 
     def late_beam_search(self, session, x_in, x_mask_in, y_in, beam_size, lateness):
-        print 'in late_beam_search'
         x_in = numpy.repeat(x_in, repeats=beam_size, axis=1)
         x_mask_in = numpy.repeat(x_mask_in, repeats=beam_size, axis=1)
         y_in_copied = numpy.repeat(y_in, repeats=beam_size, axis=1)
@@ -474,9 +471,7 @@ class StandardModel(object):
         beam_ys_out, parents_out, cost_out = session.run(
                                                     [self.late_beam_ys, self.late_parents, self.late_cost],
                                                     feed_dict=feeds)
-        print 'going to reconstruct'
         hypotheses = self._reconstruct(beam_ys_out, parents_out, cost_out, beam_size)
-        print 'done reconstructing'
 
         # prepending with lateness number of words
         for i in xrange(len(hypotheses)):

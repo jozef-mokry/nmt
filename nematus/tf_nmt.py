@@ -223,14 +223,9 @@ def translate(config, sess):
                 break
             idx, batch = job
             x, y = batch
-            print 'Got a job', idx
-            #y_dummy = numpy.zeros(shape=(len(x),1))
             x, x_mask, y, _ = prepare_data(x, y, maxlen=None)
-            # TODO: send the y's
             samples = model.late_beam_search(sess, x, x_mask, y, config.beam_size, 3)
-            print 'Got response', idx
             out_queue.put((idx, samples))
-            #in_queue.put(job)
 
     threads = [None] * config.n_threads
     for i in xrange(config.n_threads):
@@ -394,6 +389,8 @@ def parse_args():
                          help="display some beam_search samples after INT updates (default: %(default)s)")
     display.add_argument('--beam_size', type=int, default=12, metavar='INT',
                          help="size of the beam (default: %(default)s)")
+    display.add_argument('--lateness', type=int, default=3, metavar='INT',
+                         help="how many words to provide from reference when translating")
 
     translate = parser.add_argument_group('translate parameters')
     translate.add_argument('--translate_valid', action='store_true', dest='translate_valid',
