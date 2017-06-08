@@ -10,6 +10,7 @@ class Critic(StandardModel):
 
         self.samples = samples
         self.samples_mask = samples_mask
+        self.config = config
         with tf.name_scope("Critic"):
             super(Critic, self).__init__(
                     config,
@@ -26,7 +27,7 @@ class Critic(StandardModel):
 
     def _build_loss(self, config):
         with tf.name_scope("decoder"):
-            scores = self.decoder.score_true_and_fake(
+            self.true_scores, self.fake_scores = self.decoder.score_true_and_fake(
                             config,
                             self.y,
                             self.y_mask,
@@ -34,12 +35,10 @@ class Critic(StandardModel):
                             self.samples_mask)
             if config.sigmoid_score:
                 # log loss and sigmoid
-                self.true_scores, self.fake_scores = tf.split(tf.nn.sigmoid(scores), 2, axis=0)
                 self.true_loss = tf.log(self.true_scores)
                 self.fake_loss = -tf.log(1. - self.fake_scores)
             else:
                 # wasserstein loss
-                self.true_scores, self.fake_scores = tf.split(scores, 2, axis=0)
                 self.true_loss = self.true_scores
                 self.fake_loss = self.fake_scores
             self.mean_true_loss = tf.reduce_mean(self.true_loss)
@@ -56,14 +55,14 @@ class Critic(StandardModel):
         else:
             logging.info('Optimizer for critic is RMSprop')
             self.optimizer = tf.train.RMSPropOptimizer(learning_rate=config.learning_rate)
-        self.t = tf.Variable(0, name='time', trainable=False, dtype=tf.int32)
+        self.time = tf.Variable(0, name='time', trainable=False, dtype=tf.int32)
         grad_vars = self.optimizer.compute_gradients(
                             self.mean_loss, 
                             var_list=critic_vars)
         grads, varss = zip(*grad_vars)
         clipped_grads, global_norm = tf.clip_by_global_norm(grads, clip_norm=config.clip_c)
         grad_vars = zip(clipped_grads, varss)
-        self.apply_grads = self.optimizer.apply_gradients(grad_vars, global_step=self.t)
+        self.apply_grads = self.optimizer.apply_gradients(grad_vars, global_step=self.time)
         if config.weight_clip > 0:
             logging.info("Weights will be clipped to {}".format(config.weight_clip))
             with tf.control_dependencies([self.apply_grads]):
@@ -92,7 +91,7 @@ class Critic(StandardModel):
     def get_true_scores(self):
         return self.true_scores
     def get_fake_scores(self):
-        return self.fake_scores
+        return self.decoder.score(self.config, self.get_samples(), self.get_samples_mask())
     def get_x(self):
         return self.x
     def get_x_mask(self):
@@ -103,6 +102,8 @@ class Critic(StandardModel):
         return self.y_mask
     def get_samples(self):
         return self.samples
+    def get_samples_mask(self):
+        return self.samples_mask
 
 class CriticDecoder(Decoder):    
     def __init__(self, config, context, x_mask):
@@ -118,10 +119,14 @@ class CriticDecoder(Decoder):
                                                 out_size=config.state_size,
                                                 non_linearity=tf.nn.tanh))
 
+            if config.sigmoid_score:
+                non_linearity = tf.nn.sigmoid
+            else:
+                non_linearity = lambda x: x
             self.last_hidden_to_score_layer = FeedForwardLayer(
                                             in_size=config.state_size,
                                             out_size=1,
-                                            non_linearity=lambda x: x)
+                                            non_linearity=non_linearity)
 
     def _pad_and_concat(self, x, y):
         #concat x and y along axis=1, and pad to same length along axis0
@@ -155,6 +160,18 @@ class CriticDecoder(Decoder):
         y = self._pad_and_concat(y, fake)
         y_mask = self._pad_and_concat(y_mask, fake_mask)
         self._repeat_init_state() 
+        scores = self.score(config, y, y_mask, use_repeated_context=True)
+        true_scores, fake_scores = tf.split(scores, 2, axis=0)
+        return true_scores, fake_scores
+
+
+    def score(self, config, y, y_mask, use_repeated_context=False):
+        if use_repeated_context:
+            attstep = self.attstep_rep
+            init_state = self.init_state_rep
+        else:
+            attstep = self.attstep
+            init_state = self.init_state
         with tf.name_scope("y_embeddings_layer"):
             seq_len = tf.shape(y)[0]
             y_but_last = tf.slice(y, [0,0], [seq_len - 1, -1])
@@ -171,12 +188,12 @@ class CriticDecoder(Decoder):
                         prev_state,
                         gates_x=gates_x2d,
                         proposal_x=proposal_x2d)
-            att_ctx = self.attstep_rep.forward(state) 
+            att_ctx = attstep.forward(state) 
             state = self.grustep2.forward(state, att_ctx)
             return state
 
         self.states = RecurrentLayer(
-                    initial_state=self.init_state_rep,
+                    initial_state=init_state,
                     step_fn=step_fn).forward((gates_x, proposal_x))
 
         y_mask = tf.expand_dims(y_mask, axis=2) # (seqLen, batch, 1)
@@ -194,4 +211,3 @@ class CriticDecoder(Decoder):
         score = self.last_hidden_to_score_layer.forward(hidden)
         score = tf.squeeze(score, axis=1)
         return score
-
