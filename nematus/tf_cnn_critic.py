@@ -18,17 +18,11 @@ class CNNCritic(object):
         self.samples = samples
         self.samples_mask = samples_mask
         self.xT = tf.transpose(x) # ->(batch, seqLen)
-        #self.xT = tf.Print(self.xT, [self.xT[0]], summarize=100, message="Prve x")
         self.yT = tf.transpose(y) 
-        #self.yT = tf.Print(self.yT, [self.yT[0]], summarize=100, message="Prve y")
         self.samplesT = tf.transpose(samples)
-        #self.samplesT = tf.Print(self.samplesT, [self.samplesT[0]], summarize=100, message="Prve samples")
         self.x_maskT = tf.transpose(x_mask)
-        #self.x_maskT = tf.Print(self.x_maskT, [self.x_maskT[0]], summarize=100, message="Prve x_maskT")
         self.y_maskT = tf.transpose(y_mask)
-        #self.y_maskT = tf.Print(self.y_maskT, [self.y_maskT[0]], summarize=100, message="Prve y_maskT")
         self.samples_maskT = tf.transpose(samples_mask)
-        #self.samples_maskT = tf.Print(self.samples_maskT, [self.samples_maskT[0]], summarize=100, message="Prve samples_maskT")
 
         with tf.name_scope("CriticCNN"):
             self._build_model(config)
@@ -41,8 +35,6 @@ class CNNCritic(object):
                                 embedding_size=config.embedding_size)
             x_embs = self.x_emb_layer.forward(self.xT) #batch, seqLen, embedding
             x_embs *= tf.expand_dims(self.x_maskT, axis=2) #zero-out embeddings for pad symbols
-            #x_embs = tf.Print(x_embs, [tf.reduce_sum(x_embs[0], axis=1)], "x_embs", summarize=100)
-            #x_embs = tf.Print(x_embs, [x_embs], "x_embs", summarize=1000000)
         with tf.name_scope("x_cnn_layer"):
             self.x_cnn = TextCNNLayer(
                     filter_sizes=config.filter_sizes,
@@ -50,7 +42,6 @@ class CNNCritic(object):
                     filter_width=config.embedding_size,
                     activation_fn=tf.nn.relu)
             self.x_features = self.x_cnn.forward(tf.expand_dims(x_embs, axis=3), x_maskT=self.x_maskT) # batch, num_features
-            #self.x_features = tf.Print(self.x_features, [tf.reduce_sum(self.x_features, axis=1)], "x_features")
 
         ###### build features for y
         with tf.name_scope("y_embeddings_layer"):
@@ -59,7 +50,6 @@ class CNNCritic(object):
                                 embedding_size=config.embedding_size)
             y_embs = self.y_emb_layer.forward(self.yT) #seqLen, batch, embedding
             y_embs *= tf.expand_dims(self.y_maskT, axis=2) #zero-out embeddings for pad symbols
-            #y_embs = tf.Print(y_embs, [y_embs], "y_embs", summarize=1000000)
         with tf.name_scope("y_cnn_layer"):
             self.y_cnn = TextCNNLayer(
                     filter_sizes=config.filter_sizes,
@@ -67,7 +57,6 @@ class CNNCritic(object):
                     filter_width=config.embedding_size,
                     activation_fn=tf.nn.relu)
             self.y_features = self.y_cnn.forward(tf.expand_dims(y_embs, axis=3), x_maskT=self.y_maskT)
-            #self.y_features = tf.Print(self.y_features, [tf.reduce_sum(self.y_features, axis=1)], "y_features")
 
         ##### build features for samples
         with tf.name_scope("y_embeddings_layer"):
@@ -75,7 +64,6 @@ class CNNCritic(object):
             samples_embs *= tf.expand_dims(self.samples_maskT, axis=2) #zero-out embeddings for pad symbols
         with tf.name_scope("y_cnn_layer"):
             self.samples_features = self.y_cnn.forward(tf.expand_dims(samples_embs, axis=3), x_maskT=self.samples_maskT)
-            self.samples_features = tf.Print(self.samples_features, [tf.reduce_sum(self.samples_features, axis=1)], "Samples features")
 
         ###### compute scores
         xy_features = tf.concat([self.x_features, self.y_features], axis=1) # batch, 2*num_features
@@ -93,8 +81,6 @@ class CNNCritic(object):
                     self.hidden_layers.append(layer)
                     xy_features = layer.forward(xy_features)
                     xsamples_features = layer.forward(xsamples_features)
-                    xy_features = tf.Print(xy_features, [tf.reduce_sum(xy_features, axis=1)], "xy_features {}".format(i))
-                    xsamples_features = tf.Print(xsamples_features, [tf.reduce_sum(xsamples_features, axis=1)], "xsamples_features {}".format(i))
             if config.sigmoid_score:
                 non_linearity = tf.nn.sigmoid
             else:
@@ -107,8 +93,6 @@ class CNNCritic(object):
             self.true_scores = tf.squeeze(self.true_scores, axis=1)
             self.fake_scores = self.features_to_score_layer.forward(xsamples_features)
             self.fake_scores = tf.squeeze(self.fake_scores, axis=1)
-            #self.true_scores = tf.Print(self.true_scores, [self.true_scores], "true_scores")
-            #self.fake_scores = tf.Print(self.fake_scores, [self.fake_scores], "fake_scores")
 
         ###### compute loss 
         if config.sigmoid_score:
