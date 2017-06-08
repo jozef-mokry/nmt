@@ -197,17 +197,27 @@ def create_wgan(config):
     generator = Generator(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask)
     logging.info('Done')
     logging.info('Critic...')
-    fakes = generator.decoder.sample()
-    fakes_mask = create_samples_mask(fakes)
+    fakes = generator.get_samples()
+    fakes_mask = generator.get_samples_mask()
     if config.use_cnn_critic:
         critic = CNNCritic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask,
                            samples=fakes, samples_mask=fakes_mask)
     else:
         critic = Critic(config, x=x, y=y, x_mask=x_mask, y_mask=y_mask,
                         samples=fakes, samples_mask=fakes_mask)
+    if config.use_rollouts:
+        assert False, 'Not implemented yet'
+    else:
+        #TODO: create get_fake_scores()
+        rewards = critic.get_fake_scores()
+        generator.add_rewards(config, rewards)
     logging.info('Done')
     #generator._build_prefix_score(config, critic)
 
+    varss = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+    names = map(lambda x: x.name, varss)
+    for n in names:
+        print n
     saver = tf.train.Saver(max_to_keep=None)
     if not config.reload_critic_and_generator:
         init_op = tf.global_variables_initializer()
@@ -242,69 +252,119 @@ def train_wgan(config, sess):
     gen_text_iterator, _ = load_data(config)
     source_to_num, target_to_num, num_to_source, num_to_target = load_dictionaries(config)
 
-    last_time = time.time()
-    total_loss = 0.
-    true_scores = 0.
-    fake_scores = 0.
-    n_words = 0
-    n_sents = 0
-    uidx = sess.run(critic.t)
-    logging.info('uidx is {}'.format(uidx))
-    eidx = 0
-    logging.info('Epoch {}'.format(eidx))
-    while eidx < config.max_epochs:
+    critic_last_time = time.time()
+    critic_total_loss = 0.
+    critic_true_scores = 0.
+    critic_fake_scores = 0.
+    critic_n_words = 0
+    critic_n_sents = 0
+    critic_uidx = sess.run(critic.time)
+    critic_eidx = 0
+    critic_total_time = 0.
+    logging.info('critic uidx is {}'.format(critic_uidx))
+    logging.info('Critic Epoch {}'.format(critic_eidx))
+
+    generator_last_time = time.time()
+    generator_total_loss = 0.
+    generator_total_loss_without_rewards = 0.
+    generator_total_reward = 0.
+    generator_n_words = 0
+    generator_n_sents = 0
+    generator_uidx = sess.run(generator.time)
+    generator_eidx = 0
+    generator_total_time = 0.
+    logging.info('generator uidx is {}'.format(generator_uidx))
+    logging.info('Generator Epoch {}'.format(generator_eidx))
+    while critic_eidx < config.max_epochs and generator_eidx < config.max_epochs:
+
+        #### CRITIC #####
         for d_step in range(config.d_steps):
+            start_time = time.time()
             try:
                 x_in, y_in = text_iterator.next()
             except StopIteration:
                 eidx += 1
-                logging.info('Epoch {}'.format(eidx))
+                logging.info('Critic Epoch {}'.format(eidx))
                 x_in, y_in = text_iterator.next()
             x_in, x_mask_in, y_in, y_mask_in = prepare_data(x_in, y_in, maxlen=None)
             mean_loss, true_scores_mean, fake_scores_mean= critic.run_gradient_step(
                                                             sess,
                                                             x_in, x_mask_in,
                                                             y_in, y_mask_in)
-            total_loss += mean_loss*y_in.shape[1]
-            true_scores += true_scores_mean*y_in.shape[1]
-            fake_scores += fake_scores_mean*y_in.shape[1]
-                          
-                          
-                          
-            uidx += 1
-            n_words += int(numpy.sum(y_mask_in))
-            n_sents += y_in.shape[1]
-            if config.dispFreq and uidx % config.dispFreq == 0:
-                duration = time.time() - last_time
-                msg = 'Epoch: {} Update: {} Loss/sent: {} true_score/sent: {} fake_score/sent: {} Words/sec: {} True Sents/sec: {}'
+            critic_total_time += (time.time() - start_time)
+            critic_uidx += 1
+            critic_total_loss += mean_loss*y_in.shape[1]
+            critic_true_scores += true_scores_mean*y_in.shape[1]
+            critic_fake_scores += fake_scores_mean*y_in.shape[1]
+            critic_n_words += int(numpy.sum(y_mask_in))
+            critic_n_sents += y_in.shape[1]
+
+            #### FREQ #####
+            if config.dispFreq and critic_uidx % config.dispFreq == 0:
+                msg = 'Critic Epoch: {} Update: {} Loss/sent: {} true_score/sent: {} fake_score/sent: {} Words/sec: {} True Sents/sec: {}'
                 logging.info(msg.format(
-                                eidx, uidx, total_loss/n_sents,
-                                true_scores/n_sents, fake_scores/n_sents,
-                                n_words/duration, n_sents/duration))
-                last_time = time.time()
-                total_loss = 0.
-                true_scores = 0.
-                fake_scores = 0.
-                n_sents = 0
-                n_words = 0
-            if config.saveFreq and uidx % config.saveFreq == 0:
+                                critic_eidx, critic_uidx, critic_total_loss/critic_n_sents,
+                                critic_true_scores/critic_n_sents, critic_fake_scores/critic_n_sents,
+                                critic_n_words/critic_total_time, n_sents/critic_total_time))
+                critic_total_time = 0. 
+                critic_total_loss = 0.
+                critic_true_scores = 0.
+                critic_fake_scores = 0.
+                critic_n_sents = 0
+                critic_n_words = 0
+            if config.saveFreq and (critic_uidx + generator_uidx) % config.saveFreq == 0:
                 logging.info("Saving model...")
-                saver.save(sess, save_path=config.saveto, global_step=uidx)
+                saver.save(sess, save_path=config.saveto, global_step=(critic_uidx+generator_uidx))
                 logging.info('Done')
-            if config.validFreq and uidx % config.validFreq == 0:
+            if config.validFreq and critic_uidx % config.validFreq == 0:
                 wgan_validate(config, sess, generator, critic, valid_text_iterator)
 
+
+        #### GENERATOR #####
         for g_step in range(config.g_steps):
+            if config.validFreq and generator_uidx % config.validFreq == 0:
+                validate(sess, valid_text_iterator, generator)
+            start_time = time.time()
             logging.info('g_step {}'.format(g_step))
             try:
                 x_in, _ = gen_text_iterator.next()
             except StopIteration:
                 x_in, _ = gen_text_iterator.next()
+                logging.info('Generator Epoch {}'.format(eidx))
             y_dummy = numpy.zeros(shape=(len(x_in),1))
             x_in, x_mask_in, _, _ = prepare_data(x_in, y_dummy, maxlen=None)
-            generator.run_gradient_step_simple(
-                        sess,
-                        x_in, x_mask_in)
+            loss, rewards, loss_without_reward = generator.run_gradient_step_simple(
+                                                    sess,
+                                                    config,
+                                                    x_in, x_mask_in)
+            generator_uidx += 1
+            generator_total_loss += numpy.sum(loss)
+            generator_total_reward += numpy.sum(rewards)
+            generator_total_loss_without_rewards += numpy.sum(loss_without_reward)
+            generator_n_sents += x_in.shape[1]
+            generator_n_words += int(numpy.sum(x_mask_in))
+            generator_total_time += (time.time() - start_time)
+            
+            #### FREQ #####
+            if config.dispFreq and generator_uidx % config.dispFreq == 0:
+                msg = 'Generator Epoch: {} Update: {} Loss/sent: {} reward/sent: {} loss_no_reward/sent: {} Words/sec: {} Sents/sec: {}'
+                logging.info(msg.format(
+                                generator_eidx, generator_uidx, generator_total_loss/generator_n_sents,
+                                generator_total_reward/generator_n_sents, generator_total_loss_without_rewards/generator_n_sents,
+                                generator_n_words/generator_total_time, generator_n_sents/generator_total_time))
+                generator_total_time = 0. 
+                generator_total_loss = 0.
+                generator_total_reward = 0.
+                generator_total_loss_without_rewards = 0.
+                generator_n_sents = 0
+                generator_n_words = 0
+
+            if config.saveFreq and (critic_uidx + generator_uidx) % config.saveFreq == 0:
+                logging.info("Saving model...")
+                saver.save(sess, save_path=config.saveto, global_step=(critic_uidx+generator_uidx))
+                logging.info('Done')
+
+
 
 def wgan_validate(config, sess, generator, critic, text_iterator):
     all_true, all_fake = [], []
@@ -620,6 +680,7 @@ def parse_args():
     adversarial.add_argument('--no_generator_reload', action="store_false", dest="reload_generator",
                          help="")
     adversarial.add_argument('--use_adam', action="store_true", help="")
+    adversarial.add_argument('--use_rollouts', action="store_true", help="")
     adversarial.add_argument('--use_max_state', action="store_true", help="")
     adversarial.add_argument('--sigmoid_score', action="store_true", dest="sigmoid_score",
                          help="Scores will be passed through sigmoid and loss will be cross-entropy")
