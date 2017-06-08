@@ -6,10 +6,7 @@ class Generator(StandardModel):
             self, config,
             x, x_mask,
             y, y_mask):
-        self.rewards = tf.placeholder(
-                        dtype=tf.float32,
-                        name='rewards',
-                        shape=(None, None))
+
         self.reward_is_increment_of_reward = config.reward_is_increment_of_reward 
         self.num_rollouts = config.num_rollouts
         with tf.name_scope("Generator"):
@@ -19,7 +16,9 @@ class Generator(StandardModel):
                     x_mask=x_mask,
                     y=y,
                     y_mask=y_mask)
-
+        self._samples = self._get_samples()
+        self._samples_mask = create_samples_mask(self.get_samples())
+        self.rewards = None
 
     def _build_decoder(self, config):
         # use GenDecoder
@@ -29,90 +28,113 @@ class Generator(StandardModel):
             self.decoder = GenDecoder(config, self.ctx, self.x_mask)
 
     def _build_loss(self, config):
+        pass
+    def _build_optimizer(self, config):
+        print 'This is the fake optimizer'
+        self.optimizer = tf.train.RMSPropOptimizer(learning_rate=config.learning_rate)
+        self.time = tf.Variable(0, name='time', trainable=False, dtype=tf.int32)
+    def add_rewards(self, config, rewards):
+        self.rewards = rewards
+        with tf.name_scope("Generator"):
+            self._build_loss_with_rewards(config, rewards)
+            self._build_optimizer_with_rewards(config, rewards)
+    def _build_loss_with_rewards(self, config, rewards):
         # Multiply logProbs with rewards
         with tf.name_scope("decoder"):
-            self.logits = self.decoder.score(self.y)
+            self.logits = self.decoder.score(self.get_samples())
         with tf.name_scope("loss"):
             loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                    labels=self.y,
+                    labels=self.get_samples(),
                     logits=self.logits)
             #cost has shape seqLen x batch
-            loss *= self.y_mask
-            loss *= self.rewards
+            loss *= self.get_samples_mask()
             self.loss_per_sentence = tf.reduce_sum(loss, axis=0)
-            self.mean_loss = tf.reduce_mean(self.loss_per_sentence, keep_dims=False)
+            if config.use_rollouts:
+                loss *= rewards 
+                self.loss_per_sentence_with_rewards = tf.reduce_sum(loss, axis=0)
+            else:
+                self.loss_per_sentence_with_rewards = tf.reduce_sum(loss, axis=0)
+                self.loss_per_sentence_with_rewards *= rewards
 
-    def _build_optimizer(self, config):
-        # Use RMSProp
+            self.mean_loss = tf.reduce_mean(self.loss_per_sentence_with_rewards, keep_dims=False)
+
+    def _build_optimizer_with_rewards(self, config, rewards):
+        # Use RMSProp?
         generator_vars = tf.get_collection(
                             key=tf.GraphKeys.TRAINABLE_VARIABLES,
                             scope="Generator")
-        self.optimizer = tf.train.RMSPropOptimizer(learning_rate=config.learning_rate)
-        self.t = tf.Variable(0, name='time', trainable=False, dtype=tf.int32)
         grad_vars = self.optimizer.compute_gradients(
                             self.mean_loss, 
                             var_list=generator_vars)
         grads, varss = zip(*grad_vars)
         clipped_grads, global_norm = tf.clip_by_global_norm(grads, clip_norm=config.clip_c)
         grad_vars = zip(clipped_grads, varss)
-        self.apply_grads = self.optimizer.apply_gradients(grad_vars, global_step=self.t)
+        self.apply_grads = self.optimizer.apply_gradients(grad_vars, global_step=self.time)
 
-    def _build_prefix_score(self, config, critic):
-        self.prefix_len = tf.placeholder(tf.int32, name='prefix_len', shape=())
-        self.rollouts = self.decoder.sample_with_fixed_prefix(self.prefix_len, self.y)
-        lengths = tf.reduce_sum(
-                    tf.cast(tf.not_equal(self.rollouts, 0), dtype=tf.float32),
-                    axis=0)
-        lengths = tf.where(tf.equal(self.rollouts[-1], 0), lengths + 1, lengths) #Add 1 for eos if reached
-        rollouts_mask = tf.transpose(tf.sequence_mask(lengths, dtype=tf.float32)) 
-        scores = critic.score(self.rollouts, rollouts_mask, back_prop=False)
-        self.prefix_score = scores
+    #def _build_prefix_score(self, config, critic):
+    #    self.prefix_len = tf.placeholder(tf.int32, name='prefix_len', shape=())
+    #    self.rollouts = self.decoder.sample_with_fixed_prefix(self.prefix_len, self.y)
+    #    rollouts_mask = create_samples_mask(self.rollouts)
+    #    # TODO: Critic does not have a score function atm
+    #    scores = critic.score(self.rollouts, rollouts_mask, back_prop=False)
+    #    self.prefix_score = scores
 
-    def run_gradient_step_simple(self, sess, x_in, x_mask_in):
-        # 1. First generate samples
-        # 2. Score every prefix to get reward
-        # 3. Use rewards and samples to make the gradient step
+    def run_gradient_step_simple(self, sess, config, x_in, x_mask_in):
 
-        samples, samples_mask = self.generate_fakes(sess, x_in, x_mask_in)
-        logging.info('generated samples {}'.format(samples.shape))
-        (seqLen, batch) = samples.shape
+        if config.use_rollouts:
+            # 1. First generate samples
+            # 2. Score every prefix to get reward
+            # 3. Use rewards and samples to make the gradient step
+            assert False, 'Not implemented yet'
+            #rewards = numpy.zeros(dtype=numpy.float32, shape=(seqLen, batch))
+            #feeds = {self.x: x_in,
+            #        self.x_mask: x_mask_in,
+            #        self.y: samples,
+            #        self.y_mask: samples_mask,
+            #        self.prefix_len: None}
+            #for i in range(1, seqLen + 1):
+            #    feeds[self.prefix_len] = i
+            #    print 'Generating reward for prefix', i,
+            #    for _ in range(self.num_rollouts):
+            #        rewards[i-1] += sess.run(self.prefix_score, feeds)
+            #        print '.',
+            #    print 'Done'
+            #rewards *= 1./self.num_rollouts 
+            #if self.reward_is_increment_of_reward and seqLen > 1:
+            #    rewards = np.vstack([rewards[0], rewards[1:] - rewards[:-1]])
 
-        rewards = numpy.zeros(dtype=numpy.float32, shape=(seqLen, batch))
-        feeds = {self.x: x_in,
-                 self.x_mask: x_mask_in,
-                 self.y: samples,
-                 self.y_mask: samples_mask,
-                 self.prefix_len: None}
-        for i in range(1, seqLen + 1):
-            feeds[self.prefix_len] = i
-            print 'Generating reward for prefix', i,
-            for _ in range(self.num_rollouts):
-                rewards[i-1] += sess.run(self.prefix_score, feeds)
-                print '.',
-            print 'Done'
-        rewards *= 1./self.num_rollouts 
-        if self.reward_is_increment_of_reward and seqLen > 1:
-            rewards = np.vstack([rewards[0], rewards[1:] - rewards[:-1]])
+            #feeds = {self.x: x_in,
+            #        self.x_mask: x_mask_in,
+            #        self.y: samples,
+            #        self.y_mask: samples_mask,
+            #        self.rewards: rewards}
+            #sess.run(self.apply_grads, feeds)
+        else:
+            feeds = {self.x: x_in,
+                    self.x_mask: x_mask_in}
+            _, lps, lps_no_rewards, rewards, samples, samples_mask = sess.run([self.apply_grads,
+                                                    self.loss_per_sentence_with_rewards,
+                                                    self.loss_per_sentence, 
+                                                    self.rewards, self.get_samples(), self.get_samples_mask()], feeds)
+            #### DEBUG ####
+            source = list(x_in.T)
+            samples = list(samples.T)
+            samples_mask = list(samples_mask.T)
+            source_to_num, target_to_num, num_to_source, num_to_target = load_dictionaries(config)
+            assert len(source) == len(samples) == len(samples_mask), "source: {} samples: {} mask: {}".format(len(source), len(samples), len(samples_mask))
+            for i, (src, sample, sample_mask, reward) in enumerate(zip(source, samples, samples_mask, rewards)):
+                logging.debug("{} SRC: {}".format(i, seqs2words(src, num_to_source)))
+                logging.debug("{} GEN: {} Length: {}".format(i, seqs2words(sample, num_to_target), len(sample)))
+                logging.debug("{} RWD: {}".format(i, reward))
+                logging.debug("{} MSK: {} Length: {}".format(i, sample_mask, len(sample_mask)))
+                logging.debug("{} GENnum: {}".format(i, sample))
+                logging.debug("{} MSKnum: {}".format(i, sample_mask))
 
-        feeds = {self.x: x_in,
-                 self.x_mask: x_mask_in,
-                 self.y: samples,
-                 self.y_mask: samples_mask,
-                 self.rewards: rewards}
-        sess.run(self.apply_grads, feeds)
-
-    def generate_fakes(self, sess, x_in, x_mask_in):
-        samples = sess.run(self._get_samples(), {self.x : x_in, self.x_mask : x_mask_in})
-        (seqLen, batch) = samples.shape
-
-        # create mask for samples
-        lengths = (samples != 0).sum(axis=0) + 1
-        samples_mask = numpy.zeros(dtype=numpy.float32, shape=(seqLen, batch))
-        for i in range(batch):
-            samples_mask[:lengths[i], i] = 1
-
-        return samples, samples_mask
-
+            return lps, rewards, lps_no_rewards
+    def get_samples(self):
+        return self._samples
+    def get_samples_mask(self):
+        return self._samples_mask
 
 class GenDecoder(Decoder):
     def __init__(self, config, context, x_mask):
